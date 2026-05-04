@@ -1,0 +1,157 @@
+{% extends "layout.html" %}
+
+{% block title %}Maestro de Feriados{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="row g-3">
+        <!-- Panel Lateral de Registro con colores sobrios -->
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0" style="border-top: 3px solid #64748b !important;">
+                <div class="card-header bg-white py-2">
+                    <h6 class="mb-0 fw-bold" style="color: #475569;">
+                        <i class="bi bi-pencil-square me-2"></i>Nueva Entrada
+                    </h6>
+                </div>
+                <div class="card-body bg-white">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted" style="font-size: 0.75rem;">FECHA DEL FERIADO</label>
+                        <input type="date" id="fecha" class="form-control form-control-sm border-light-subtle">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted" style="font-size: 0.75rem;">MOTIVO / DESCRIPCIÓN</label>
+                        <textarea id="motivo" class="form-control form-control-sm" rows="2" placeholder="Ej: Aniversario Local"></textarea>
+                    </div>
+                    <div class="mb-3 d-flex align-items-center">
+                        <div class="form-check form-switch p-0 ps-5">
+                            <input class="form-check-input" type="checkbox" id="esRecuperable">
+                            <label class="form-check-label small fw-bold text-secondary" for="esRecuperable" style="font-size: 0.75rem;">¿Es día recuperable?</label>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-top d-flex justify-content-start">
+                        <button type="button" class="btn btn-primary btn-sm px-4" onclick="guardarFeriado()">
+                            <i class="bi bi-save"></i> Guardar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold text-secondary"><i class="bi bi-list-stars me-2"></i>HISTORIAL DE FERIADOS</h6>
+                    <div class="d-flex align-items-center">
+                        <span class="small fw-bold text-muted me-2">AÑO:</span>
+                        <select id="filtroAnio" class="form-select form-select-sm" style="width: 100px;" onchange="filtrarPorAnio()">
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm table-hover mb-0" style="font-size: 0.82rem;">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th class="ps-3" style="width: 120px;">FECHA</th>
+                                <th>MOTIVO</th>
+                                <th class="text-center" style="width: 100px;">TIPO</th>
+                                <th class="text-center" style="width: 50px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaCuerpo">
+                            {% for f in feriados %}
+                            <tr class="feriado-row" data-anio="{{ f.Fecha.year if f.Fecha else '' }}">
+                                <td class="ps-3 align-middle fw-bold text-primary">{{ f.Fecha.strftime('%d/%m/%Y') if f.Fecha else '' }}</td>
+                                <td class="align-middle">{{ f.Motivo }}</td>
+                                <td class="text-center align-middle">
+                                    {% if f.EsRecuperable %}
+                                        <span class="badge rounded-pill bg-info-subtle text-info border border-info" style="font-size: 0.65rem;">RECUPERABLE</span>
+                                    {% else %}
+                                        <span class="badge rounded-pill bg-light text-muted border" style="font-size: 0.65rem;">NO RECUP.</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center align-middle">
+                                    <button class="btn btn-link btn-sm text-danger p-0" type="button" onclick="eliminarFeriado({{ f.IdFeriado }})">
+                                        <i class="bi bi-x-circle-fill"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const selector = document.getElementById('filtroAnio');
+    const anioActual = new Date().getFullYear();
+
+    for (let i = anioActual + 1; i >= anioActual - 3; i--) {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.innerHTML = String(i);
+        if (i === anioActual) opt.selected = true;
+        selector.appendChild(opt);
+    }
+
+    filtrarPorAnio();
+});
+
+function filtrarPorAnio() {
+    const anioBusqueda = document.getElementById('filtroAnio').value;
+    const filas = document.querySelectorAll('.feriado-row');
+
+    filas.forEach((fila) => {
+        if (fila.getAttribute('data-anio') === anioBusqueda) {
+            fila.style.display = '';
+        } else {
+            fila.style.display = 'none';
+        }
+    });
+}
+
+async function guardarFeriado() {
+    const data = {
+        fecha: document.getElementById('fecha').value,
+        motivo: document.getElementById('motivo').value.trim(),
+        esRecuperable: document.getElementById('esRecuperable').checked
+    };
+
+    if (!data.fecha || !data.motivo) {
+        alert('Por favor complete fecha y motivo.');
+        return;
+    }
+
+    const response = await fetch('/api/feriados/guardar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+        location.reload();
+        return;
+    }
+    alert(result.error || 'No se pudo guardar el feriado.');
+}
+
+async function eliminarFeriado(id) {
+    if (!confirm('¿Está seguro de eliminar este feriado?')) return;
+
+    const response = await fetch(`/api/feriados/eliminar/${id}`, { method: 'DELETE' });
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+        location.reload();
+        return;
+    }
+    alert(result.error || 'No se pudo eliminar el feriado.');
+}
+</script>
+{% endblock %}

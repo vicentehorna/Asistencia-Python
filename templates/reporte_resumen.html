@@ -1,0 +1,393 @@
+{% extends "layout.html" %}
+
+{% block title %}Resumen de Asistencia{% endblock %}
+
+{% block extra_css %}
+<style>
+    #tbody-resumen-asistencia td {
+        white-space: nowrap;
+    }
+    #tbody-resumen-asistencia tr.fila-falta td {
+        background-color: #fff3cd;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+        <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-funnel"></i> Filtros del Reporte</h5>
+    </div>
+    <div class="card-body">
+        <form id="frmResumenAsistencia" class="row g-3">
+            <div class="col-md-4">
+                <label for="cboCompania" class="form-label small fw-bold text-muted">Compañía</label>
+                <select id="cboCompania" class="form-select form-select-sm" required>
+                    <option value="">Seleccione...</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="txtFechaIni" class="form-label small fw-bold text-muted">Fecha Inicio</label>
+                <input type="date" id="txtFechaIni" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-2">
+                <label for="txtFechaFin" class="form-label small fw-bold text-muted">Fecha Fin</label>
+                <input type="date" id="txtFechaFin" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-4">
+                <label for="cboTrabajador" class="form-label small fw-bold text-muted">Trabajador</label>
+                <select id="cboTrabajador" class="form-select form-select-sm" disabled>
+                    <option value="0">Todos</option>
+                </select>
+            </div>
+
+            <div class="col-12 d-flex gap-2 border-top pt-3 mt-3">
+                <button type="submit" class="btn btn-primary btn-sm px-4">
+                    <i class="bi bi-search"></i> Consultar
+                </button>
+                <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcel" disabled>
+                    <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 d-none" id="cardResultado">
+    <div class="card-body">
+        <h4 class="text-center fw-bold mb-4">RESUMEN DE ASISTENCIA</h4>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover table-bordered border align-middle" style="font-size: 0.85rem;">
+                <thead class="table-light">
+                    <tr class="text-center">
+                        <th>PERSONA</th>
+                        <th>NOMBRE</th>
+                        <th>FECHA</th>
+                        <th>DÍA</th>
+                        <th>HORARIO</th>
+                        <th>ENTRADA</th>
+                        <th>SALIDA REFRI</th>
+                        <th>ENTRADA REFRI</th>
+                        <th>SALIDA</th>
+                        <th>FALTA</th>
+                        <th>MIN. TARDE</th>
+                        <th>MOTIVO</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody-resumen-asistencia"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async function () {
+    const cboCompania = document.getElementById('cboCompania');
+    const cboTrabajador = document.getElementById('cboTrabajador');
+    const txtFechaIni = document.getElementById('txtFechaIni');
+    const txtFechaFin = document.getElementById('txtFechaFin');
+    const frm = document.getElementById('frmResumenAsistencia');
+    const btnExportExcel = document.getElementById('btnExportExcel');
+    const tbody = document.getElementById('tbody-resumen-asistencia');
+    const cardResultado = document.getElementById('cardResultado');
+    let lastResumenAsistenciaExport = null;
+
+    const escapeHtml = (s) => String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const normalizeValue = (v) => (v == null ? '' : String(v).trim());
+    const formatDateIso = (d) => d.toISOString().slice(0, 10);
+    const formatHoraHHMM = (v) => {
+        const s = normalizeValue(v);
+        if (!s) return '';
+        const m = s.match(/(\d{1,2}):(\d{2})/);
+        if (!m) return s;
+        return `${m[1].padStart(2, '0')}:${m[2]}`;
+    };
+    const esFalta = (v) => normalizeValue(v).toLowerCase() === 'si';
+
+    function setDefaultDates() {
+        const hoy = new Date();
+        const firstDay = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        txtFechaIni.value = formatDateIso(firstDay);
+        txtFechaFin.value = formatDateIso(hoy);
+    }
+
+    async function poblarSelect(url, selectElement, includeTodos) {
+        selectElement.innerHTML = '<option value="">Cargando...</option>';
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            selectElement.innerHTML = '';
+            if (includeTodos) {
+                const optTodos = document.createElement('option');
+                optTodos.value = '0';
+                optTodos.textContent = 'Todos';
+                selectElement.appendChild(optTodos);
+            } else {
+                const def = document.createElement('option');
+                def.value = '';
+                def.textContent = 'Seleccione...';
+                selectElement.appendChild(def);
+            }
+            (Array.isArray(data) ? data : []).forEach((item) => {
+                const opt = document.createElement('option');
+                opt.value = item.id != null ? String(item.id) : '';
+                opt.textContent = item.text != null ? String(item.text) : '';
+                selectElement.appendChild(opt);
+            });
+            selectElement.disabled = false;
+        } catch (err) {
+            console.error(err);
+            selectElement.innerHTML = '<option value="">Error</option>';
+            selectElement.disabled = true;
+        }
+    }
+
+    function renderRows(data) {
+        tbody.innerHTML = '';
+        data.forEach((row) => {
+            const tr = document.createElement('tr');
+            if (esFalta(row.falta)) {
+                tr.classList.add('fila-falta');
+            }
+            tr.innerHTML = `
+                <td class="text-center font-monospace">${escapeHtml(normalizeValue(row.person))}</td>
+                <td>${escapeHtml(normalizeValue(row.name))}</td>
+                <td class="text-center">${escapeHtml(normalizeValue(row.fecha))}</td>
+                <td class="text-center">${escapeHtml(normalizeValue(row.diasem))}</td>
+                <td>${escapeHtml(normalizeValue(row.nombrehorario))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.entrada))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.salidarefri))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.entradarefri))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.salida))}</td>
+                <td class="text-center">${escapeHtml(normalizeValue(row.falta))}</td>
+                <td class="text-end">${escapeHtml(normalizeValue(row.minutostarde))}</td>
+                <td>${escapeHtml(normalizeValue(row.motivo))}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function selectedText(selectEl) {
+        const opt = selectEl && selectEl.options ? selectEl.options[selectEl.selectedIndex] : null;
+        return opt ? String(opt.textContent || '').trim() : '';
+    }
+
+    async function exportResumenAsistenciaExcel(data, meta) {
+        if (typeof ExcelJS === 'undefined') {
+            alert('No se pudo cargar la librería de Excel (ExcelJS). Recargue la página e intente de nuevo.');
+            return;
+        }
+
+        const header = ['PERSONA', 'NOMBRE', 'FECHA', 'DÍA', 'HORARIO', 'ENTRADA', 'SALIDA REFRI', 'ENTRADA REFRI', 'SALIDA', 'FALTA', 'MIN. TARDE', 'MOTIVO'];
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Resumen Asistencia', { views: [{ showGridLines: true }] });
+
+        const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+        const borderThin = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+        const allBorders = { top: borderThin, left: borderThin, bottom: borderThin, right: borderThin };
+
+        ws.mergeCells(1, 1, 1, header.length);
+        const t = ws.getCell(1, 1);
+        t.value = 'REPORTE RESUMEN DE ASISTENCIA';
+        t.font = { bold: true, size: 14 };
+        t.alignment = { horizontal: 'center', vertical: 'middle' };
+        t.fill = fill('FFE9ECEF');
+        t.border = allBorders;
+        ws.getRow(1).height = 26;
+
+        const metaRow = ws.addRow([
+            'Compañía', meta.compania || '',
+            'Trabajador', meta.trabajador || '',
+            'F. Inicio', meta.fechaini || '',
+            'F. Fin', meta.fechafin || '',
+            '', ''
+        ]);
+        metaRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+            if (colNumber <= 8) {
+                cell.fill = fill('FFF8F9FA');
+                cell.font = { bold: colNumber % 2 === 1 };
+                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            }
+            cell.border = allBorders;
+        });
+
+        ws.addRow([]);
+
+        const h = ws.addRow(header);
+        h.font = { bold: true };
+        h.eachCell((cell) => {
+            cell.fill = fill('FFF8F9FA');
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.border = allBorders;
+        });
+
+        data.forEach((row) => {
+            const falta = normalizeValue(row.falta);
+            const r = ws.addRow([
+                normalizeValue(row.person),
+                normalizeValue(row.name),
+                normalizeValue(row.fecha),
+                normalizeValue(row.diasem),
+                normalizeValue(row.nombrehorario),
+                formatHoraHHMM(row.entrada),
+                formatHoraHHMM(row.salidarefri),
+                formatHoraHHMM(row.entradarefri),
+                formatHoraHHMM(row.salida),
+                falta,
+                normalizeValue(row.minutostarde),
+                normalizeValue(row.motivo),
+            ]);
+            const isFalta = esFalta(falta);
+            r.eachCell((cell, colNumber) => {
+                cell.border = allBorders;
+                cell.fill = fill(isFalta ? 'FFFFF3CD' : 'FFFFFFFF');
+                if ([1, 3, 4, 6, 7, 8, 9, 10].includes(colNumber)) {
+                    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                } else if (colNumber === 11) {
+                    cell.alignment = { horizontal: 'right', vertical: 'middle' };
+                } else {
+                    cell.alignment = { horizontal: 'left', vertical: 'middle' };
+                }
+            });
+        });
+
+        ws.getColumn(1).width = 12;
+        ws.getColumn(2).width = 28;
+        ws.getColumn(3).width = 12;
+        ws.getColumn(4).width = 10;
+        ws.getColumn(5).width = 18;
+        ws.getColumn(6).width = 12;
+        ws.getColumn(7).width = 14;
+        ws.getColumn(8).width = 15;
+        ws.getColumn(9).width = 12;
+        ws.getColumn(10).width = 10;
+        ws.getColumn(11).width = 12;
+        ws.getColumn(12).width = 30;
+
+        const buffer = await wb.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().slice(0, 10);
+        const safe = (s) => String(s || 'export').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 80);
+        a.href = url;
+        a.download = `resumen_asistencia_${safe(meta.compania)}_${stamp}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }
+
+    setDefaultDates();
+    await poblarSelect('/api/selectores/companias', cboCompania, false);
+
+    cboCompania.addEventListener('change', async function () {
+        const cia = this.value.trim();
+        cardResultado.classList.add('d-none');
+        tbody.innerHTML = '';
+        lastResumenAsistenciaExport = null;
+        btnExportExcel.disabled = true;
+        if (!cia) {
+            cboTrabajador.innerHTML = '<option value="0">Todos</option>';
+            cboTrabajador.disabled = true;
+            return;
+        }
+        await poblarSelect(`/api/selectores/trabajadores?cia=${encodeURIComponent(cia)}`, cboTrabajador, true);
+    });
+
+    frm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const cia = cboCompania.value.trim();
+        const fechaini = txtFechaIni.value;
+        const fechafin = txtFechaFin.value;
+        const person = (cboTrabajador.value || '0').trim() || '0';
+
+        if (!cia) {
+            alert('Seleccione una compañía.');
+            return;
+        }
+        if (!fechaini || !fechafin) {
+            alert('Debe seleccionar el rango de fechas.');
+            return;
+        }
+        if (fechaini > fechafin) {
+            alert('La fecha inicio no puede ser mayor que la fecha fin.');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/reportes/resumen-asistencia', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cia, fechaini, fechafin, person })
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                cardResultado.classList.add('d-none');
+                lastResumenAsistenciaExport = null;
+                btnExportExcel.disabled = true;
+                alert(data.error || 'Error al consultar el reporte.');
+                return;
+            }
+            if (!Array.isArray(data)) {
+                cardResultado.classList.add('d-none');
+                lastResumenAsistenciaExport = null;
+                btnExportExcel.disabled = true;
+                alert('Respuesta inválida del servidor.');
+                return;
+            }
+            if (data.length === 0) {
+                tbody.innerHTML = '';
+                cardResultado.classList.add('d-none');
+                lastResumenAsistenciaExport = null;
+                btnExportExcel.disabled = true;
+                alert('No se encontraron registros para los filtros seleccionados.');
+                return;
+            }
+
+            renderRows(data);
+            cardResultado.classList.remove('d-none');
+            lastResumenAsistenciaExport = {
+                data,
+                meta: {
+                    compania: selectedText(cboCompania),
+                    trabajador: selectedText(cboTrabajador) || 'Todos',
+                    fechaini,
+                    fechafin
+                }
+            };
+            btnExportExcel.disabled = false;
+        } catch (err) {
+            console.error(err);
+            cardResultado.classList.add('d-none');
+            lastResumenAsistenciaExport = null;
+            btnExportExcel.disabled = true;
+            alert('Error de red o del servidor.');
+        }
+    });
+
+    btnExportExcel.addEventListener('click', async function () {
+        if (!lastResumenAsistenciaExport || !lastResumenAsistenciaExport.data || !lastResumenAsistenciaExport.data.length) {
+            alert('Ejecute primero una búsqueda con resultados.');
+            return;
+        }
+        try {
+            await exportResumenAsistenciaExcel(lastResumenAsistenciaExport.data, lastResumenAsistenciaExport.meta);
+        } catch (err) {
+            console.error(err);
+            alert('No se pudo generar el archivo Excel.');
+        }
+    });
+});
+</script>
+{% endblock %}

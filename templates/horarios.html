@@ -1,0 +1,343 @@
+{% extends "layout.html" %}
+
+{% block title %}Configuración de Horarios{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <h4 class="fw-bold mb-3" style="color: #1e293b;">Configuración de Horarios</h4>
+
+    <div class="row g-3 mb-3 align-items-center">
+        <div class="col-md-6">
+            <div class="d-flex align-items-center bg-white p-2 border rounded shadow-sm">
+                <label class="small fw-bold text-muted me-3 ms-2 text-nowrap" for="companySelector">COMPAÑÍA:</label>
+                <select id="companySelector" class="form-select form-select-sm border-0 fw-bold" style="color: #334155;">
+                    {% for c in companies %}
+                    <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.text }}</option>
+                    {% else %}
+                    <option value="">Sin compañías disponibles</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-md-6 text-end">
+            <button type="button" class="btn btn-success btn-sm px-4 shadow-sm me-2" onclick="nuevoHorario()">
+                <i class="bi bi-plus-lg"></i> Nuevo
+            </button>
+            <button type="button" class="btn btn-primary btn-sm px-4" onclick="guardarHorario()">
+                <i class="bi bi-save"></i> Guardar
+            </button>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-md-3">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white py-2 border-bottom">
+                    <span class="small fw-bold text-muted">HORARIOS</span>
+                </div>
+                <div class="card-body p-2 bg-light" id="listaHorarios" style="max-height: 70vh; overflow-y: auto;">
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-9">
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-4">
+                    <input type="hidden" id="idHorario" value="">
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-9 position-relative">
+                            <label class="small text-muted fw-bold bg-white px-2 position-absolute" style="top:-10px; left:20px; z-index:1;">Nombre del Horario</label>
+                            <input type="text" id="nombreHorario" class="form-control border shadow-none pt-3" placeholder="Ej: Administrativo" autocomplete="off">
+                        </div>
+                        <div class="col-md-3 position-relative">
+                            <label class="small text-muted fw-bold bg-white px-2 position-absolute" style="top:-10px; left:20px; z-index:1;">Tolerancia (minutos)</label>
+                            <input type="number" id="tolerancia" class="form-control border shadow-none pt-3" value="0" min="0">
+                        </div>
+                    </div>
+
+                    <div class="bg-light p-3 rounded horarios-grilla-inner">
+                        <div class="row g-0 text-center mb-2 fw-bold text-muted horarios-grid-head">
+                            <div class="col-2 text-start ps-3">Día</div>
+                            <div class="col-2">¿Lab?</div>
+                            <div class="col-2">Entrada</div>
+                            <div class="col-2">S. Refri</div>
+                            <div class="col-2">E. Refri</div>
+                            <div class="col-2">Salida</div>
+                        </div>
+
+                        {% for dia_key, dia_label in dias %}
+                        <div class="row g-2 align-items-center mb-2 p-2 bg-white rounded border dia-row shadow-xs" data-dia="{{ dia_key }}">
+                            <div class="col-2 fw-bold text-secondary ps-2 dia-label" style="font-size: 0.8rem;">{{ dia_label }}</div>
+                            <div class="col-2 text-center">
+                                <div class="form-check form-switch d-inline-block">
+                                    <input class="form-check-input chk-laborable" type="checkbox" data-dia-key="{{ dia_key }}"
+                                           id="{{ dia_key }}_laborable"
+                                           {% if dia_key not in ['Sabado', 'Domingo'] %}checked{% endif %}
+                                           onchange="toggleDia(this)">
+                                </div>
+                            </div>
+                            <div class="col-2"><input type="time" class="form-control form-control-sm border-light text-center t-entrada" value="08:30"></div>
+                            <div class="col-2"><input type="time" class="form-control form-control-sm border-light text-center t-s-refri" value="13:00"></div>
+                            <div class="col-2"><input type="time" class="form-control form-control-sm border-light text-center t-e-refri" value="14:00"></div>
+                            <div class="col-2"><input type="time" class="form-control form-control-sm border-light text-center t-salida" value="16:00"></div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .list-item-horario { cursor: pointer; border-left: 4px solid transparent !important; transition: 0.2s; }
+    .list-item-horario:hover { background-color: #f8fafc !important; }
+    .active-horario { border-left: 4px solid #3b82f6 !important; background-color: #eff6ff !important; }
+    .shadow-xs { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
+    input[type="time"]:disabled { background-color: #f1f5f9; color: #cbd5e1; opacity: 0.6; }
+    .horarios-grilla-inner { box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.06); }
+    @media (max-width: 991.98px) {
+        .horarios-grid-head { font-size: 0.65rem; }
+        .dia-label { font-size: 0.7rem !important; }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const DEFAULTS = { entrada: '08:30', salidaRefri: '13:00', entradaRefri: '14:00', salida: '16:00' };
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function getCia() {
+        const el = document.getElementById('companySelector');
+        return el && el.value ? String(el.value).trim() : '';
+    }
+
+    function setListaLoading() {
+        const box = document.getElementById('listaHorarios');
+        box.innerHTML = '<div class="text-muted small p-2">Cargando…</div>';
+    }
+
+    function aplicarToggleFila(chk) {
+        const row = chk.closest('.dia-row');
+        if (!row) return;
+        const on = chk.checked;
+        row.querySelectorAll('.t-entrada, .t-s-refri, .t-e-refri, .t-salida').forEach(function (inp) {
+            inp.disabled = !on;
+            if (!on) {
+                inp.value = '';
+            } else if (!inp.value) {
+                const cls = inp.className;
+                if (cls.indexOf('t-entrada') >= 0) inp.value = DEFAULTS.entrada;
+                else if (cls.indexOf('t-s-refri') >= 0) inp.value = DEFAULTS.salidaRefri;
+                else if (cls.indexOf('t-e-refri') >= 0) inp.value = DEFAULTS.entradaRefri;
+                else if (cls.indexOf('t-salida') >= 0) inp.value = DEFAULTS.salida;
+            }
+        });
+    }
+
+    window.toggleDia = function (chk) {
+        aplicarToggleFila(chk);
+    };
+
+    function initDiasLaborables() {
+        document.querySelectorAll('.dia-row .chk-laborable').forEach(function (chk) {
+            aplicarToggleFila(chk);
+        });
+    }
+
+    function renderListaHorarios(items) {
+        const box = document.getElementById('listaHorarios');
+        if (!items || !items.length) {
+            box.innerHTML = '<div class="text-muted small p-2">No hay horarios para esta compañía.</div>';
+            return;
+        }
+        let html = '';
+        items.forEach(function (h) {
+            const id = h.IdHorario != null ? h.IdHorario : h.idHorario;
+            const nom = h.NombreHorario != null ? h.NombreHorario : h.nombreHorario;
+            const tol = h.ToleranciaMinutos != null ? h.ToleranciaMinutos : h.toleranciaMinutos;
+            html += '<div class="card mb-2 border-0 shadow-sm list-item-horario" data-id="' + escapeHtml(id) + '" onclick="cargarHorario(' + Number(id) + ')">';
+            html += '<div class="card-body p-2 d-flex align-items-center">';
+            html += '<i class="bi bi-clock-history fs-5 me-3 text-primary"></i>';
+            html += '<div><div class="fw-bold small" style="font-size: 0.75rem;">' + escapeHtml(nom) + '</div>';
+            html += '<div class="text-muted" style="font-size: 0.65rem;">Tolerancia: ' + escapeHtml(tol) + ' min</div></div></div></div>';
+        });
+        box.innerHTML = html;
+    }
+
+    function marcarActivoLista(id) {
+        document.querySelectorAll('.list-item-horario').forEach(function (el) {
+            el.classList.toggle('active-horario', String(el.getAttribute('data-id')) === String(id));
+        });
+    }
+
+    window.cargarHorario = async function (id) {
+        const cia = getCia();
+        if (!cia || !id) return;
+        try {
+            const res = await fetch('/api/horarios/' + encodeURIComponent(id) + '?cia=' + encodeURIComponent(cia));
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.error || 'No se pudo cargar el horario.');
+                return;
+            }
+            document.getElementById('idHorario').value = String(data.idHorario || id);
+            document.getElementById('nombreHorario').value = data.nombreHorario || '';
+            document.getElementById('tolerancia').value = data.toleranciaMinutos != null ? data.toleranciaMinutos : 0;
+            const dias = data.dias || {};
+            document.querySelectorAll('.dia-row').forEach(function (row) {
+                const dia = row.getAttribute('data-dia');
+                const d = dias[dia] || {};
+                const chk = row.querySelector('.chk-laborable');
+                chk.checked = !!d.laborable;
+                row.querySelector('.t-entrada').value = d.entrada || '';
+                row.querySelector('.t-s-refri').value = d.salidaRefri || '';
+                row.querySelector('.t-e-refri').value = d.entradaRefri || '';
+                row.querySelector('.t-salida').value = d.salida || '';
+                aplicarToggleFila(chk);
+            });
+            marcarActivoLista(id);
+        } catch (e) {
+            console.error(e);
+            alert('Error de red al cargar el horario.');
+        }
+    };
+
+    window.nuevoHorario = function () {
+        document.getElementById('idHorario').value = '';
+        document.getElementById('nombreHorario').value = '';
+        document.getElementById('tolerancia').value = '0';
+        document.querySelectorAll('.dia-row').forEach(function (row) {
+            const dia = row.getAttribute('data-dia');
+            const chk = row.querySelector('.chk-laborable');
+            chk.checked = (dia !== 'Sabado' && dia !== 'Domingo');
+            row.querySelector('.t-entrada').value = DEFAULTS.entrada;
+            row.querySelector('.t-s-refri').value = DEFAULTS.salidaRefri;
+            row.querySelector('.t-e-refri').value = DEFAULTS.entradaRefri;
+            row.querySelector('.t-salida').value = DEFAULTS.salida;
+            aplicarToggleFila(chk);
+        });
+        document.querySelectorAll('.list-item-horario').forEach(function (el) {
+            el.classList.remove('active-horario');
+        });
+    };
+
+    async function recargarListaYSeleccion() {
+        const cia = getCia();
+        setListaLoading();
+        if (!cia) {
+            document.getElementById('listaHorarios').innerHTML = '<div class="text-muted small p-2">Seleccione compañía.</div>';
+            return;
+        }
+        try {
+            const res = await fetch('/api/horarios/lista?cia=' + encodeURIComponent(cia));
+            const items = await res.json();
+            renderListaHorarios(Array.isArray(items) ? items : []);
+            const currentId = document.getElementById('idHorario').value.trim();
+            if (currentId && items.some(function (h) {
+                const id = h.IdHorario != null ? h.IdHorario : h.idHorario;
+                return String(id) === String(currentId);
+            })) {
+                await cargarHorario(Number(currentId));
+            } else if (items.length) {
+                const first = items[0];
+                const fid = first.IdHorario != null ? first.IdHorario : first.idHorario;
+                await cargarHorario(Number(fid));
+            } else {
+                nuevoHorario();
+            }
+        } catch (e) {
+            console.error(e);
+            document.getElementById('listaHorarios').innerHTML = '<div class="text-danger small p-2">Error al cargar la lista.</div>';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        initDiasLaborables();
+        const sel = document.getElementById('companySelector');
+        if (sel) {
+            sel.addEventListener('change', function () {
+                nuevoHorario();
+                recargarListaYSeleccion();
+            });
+        }
+        recargarListaYSeleccion();
+    });
+
+    window.guardarHorario = async function () {
+        const nombre = document.getElementById('nombreHorario').value.trim();
+        const toleranciaRaw = document.getElementById('tolerancia').value;
+        const toleranciaMinutos = toleranciaRaw === '' ? 0 : parseInt(toleranciaRaw, 10);
+        const company = getCia();
+        const idStr = document.getElementById('idHorario').value.trim();
+
+        if (!company) {
+            alert('Seleccione una compañía.');
+            return;
+        }
+        if (!nombre) {
+            alert('Indique el nombre del horario.');
+            return;
+        }
+        if (Number.isNaN(toleranciaMinutos) || toleranciaMinutos < 0) {
+            alert('La tolerancia debe ser un número entero mayor o igual a 0.');
+            return;
+        }
+
+        const dias = {};
+        document.querySelectorAll('.dia-row').forEach(function (tr) {
+            const dia = tr.getAttribute('data-dia');
+            const lab = tr.querySelector('.chk-laborable');
+            dias[dia] = {
+                laborable: lab ? lab.checked : false,
+                entrada: tr.querySelector('.t-entrada').value,
+                salidaRefri: tr.querySelector('.t-s-refri').value,
+                entradaRefri: tr.querySelector('.t-e-refri').value,
+                salida: tr.querySelector('.t-salida').value
+            };
+        });
+
+        const payload = {
+            company: company,
+            nombreHorario: nombre,
+            toleranciaMinutos: toleranciaMinutos,
+            dias: dias
+        };
+        if (idStr) payload.idHorario = parseInt(idStr, 10);
+
+        try {
+            const response = await fetch('/api/horarios/guardar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                if (result.id != null) {
+                    document.getElementById('idHorario').value = String(result.id);
+                }
+                await recargarListaYSeleccion();
+                if (document.getElementById('idHorario').value) {
+                    marcarActivoLista(document.getElementById('idHorario').value);
+                }
+                return;
+            }
+            alert(result.error || 'No se pudo guardar el horario.');
+        } catch (e) {
+            console.error(e);
+            alert('Error de red o del servidor.');
+        }
+    };
+})();
+</script>
+{% endblock %}
