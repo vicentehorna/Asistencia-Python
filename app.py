@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
@@ -76,6 +76,8 @@ def _jsonable_value(value):
         return None
     if isinstance(value, Decimal):
         return float(value)
+    if isinstance(value, time):
+        return value.strftime('%H:%M:%S')
     if isinstance(value, datetime):
         return value.strftime('%d/%m/%Y')
     if isinstance(value, date):
