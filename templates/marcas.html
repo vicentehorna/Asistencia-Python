@@ -1,0 +1,584 @@
+{% extends "layout.html" %}
+
+{% block title %}Gestión de Marcas{% endblock %}
+
+{% block content %}
+<div id="marcasRoot" class="container-fluid py-3" data-photos-base="{{ photos_base | e }}">
+    <h4 class="fw-bold mb-3" style="color: #1e293b;">Gestión de Marcas</h4>
+    <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
+        <div class="card-body bg-light p-3">
+            <form id="frmFiltros" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold text-muted mb-1" for="cia">Compañía</label>
+                    <select id="cia" name="cia" class="form-select form-select-sm shadow-none border-secondary" required>
+                        {% for c in companies %}
+                        <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
+                        {% else %}
+                        <option value="">Sin compañías</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold text-muted mb-1" for="fechaInicio">Fecha Inicio</label>
+                    <input type="date" id="fechaInicio" name="fechaInicio" class="form-control form-control-sm border-secondary shadow-none" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold text-muted mb-1" for="fechaFin">Fecha Fin</label>
+                    <input type="date" id="fechaFin" name="fechaFin" class="form-control form-control-sm border-secondary shadow-none" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold text-muted mb-1" for="person"><i class="bi bi-person-bounding-box me-1"></i> Filtrar por Trabajador</label>
+                    <select id="person" name="person" class="form-select form-select-sm shadow-none border-secondary" disabled>
+                        <option value="0">TODOS LOS TRABAJADORES</option>
+                    </select>
+                </div>
+                <div class="col-12 border-top pt-3 mt-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <button type="submit" class="btn btn-primary btn-sm px-4">
+                            <i class="bi bi-search"></i> Consultar
+                        </button>
+                        <button type="button" class="btn btn-success btn-sm px-4" id="btnExportMarcasExcel" disabled>
+                            <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
+                        </button>
+                        <button type="button" class="btn btn-success btn-sm px-4 shadow-sm" onclick="abrirModalManual()">
+                            <i class="bi bi-plus-lg"></i> Manual
+                        </button>
+                        <span class="ms-auto small text-muted fw-bold" id="lblRowCountMarcas">0 registros</span>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 65vh; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0 align-middle" style="font-size: 0.82rem;">
+                    <thead class="table-light" style="position: sticky; top: 0; z-index: 1; color: #334155;">
+                        <tr class="text-center text-uppercase">
+                            <th class="py-2 text-start ps-3">DNI</th>
+                            <th class="text-start">Nombre</th>
+                            <th>Día</th>
+                            <th>Fecha</th>
+                            <th>Hora</th>
+                            <th class="text-start">Cargo</th>
+                            <th>Evidencia</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaMarcasBody" class="text-center"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalEvidencia" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header border-bottom-0 pb-0">
+                <h6 class="modal-title fw-bold text-secondary" id="modalEvidenciaTitulo">Evidencia</h6>
+                <button type="button" class="btn-close shadow-none" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body text-center pt-2">
+                <p id="imgEvidenciaError" class="small text-danger d-none mb-2">No se pudo cargar la imagen. Revise MARCAS_FOTOS_BASE_URL en .env (URL absoluta del sitio IIS, ej. https://179.61.14.224/FOTOS).</p>
+                <img id="imgEvidencia" src="" class="img-fluid rounded shadow-sm" alt="Foto evidencia" style="max-height: 400px; object-fit: contain;" referrerpolicy="no-referrer-when-downgrade">
+            </div>
+            <div class="modal-footer border-top-0 pt-0">
+                <button type="button" class="btn btn-light btn-sm text-primary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalManual" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header" style="background-color: #1e293b; color: white;">
+                <h6 class="modal-title"><i class="bi bi-clock-history me-2"></i>Registrar Marca Manual</h6>
+                <button type="button" class="btn-close btn-close-white shadow-none" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-bold" for="trabajadorManual">Trabajador</label>
+                    <select id="trabajadorManual" class="form-select form-select-sm shadow-none"></select>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold" for="manualFecha">Fecha</label>
+                        <input type="date" id="manualFecha" class="form-control form-control-sm shadow-none">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold" for="manualHora">Hora <span class="text-danger">*</span> <span class="text-muted fw-normal">(hh:mm:ss)</span></label>
+                        <input type="time" id="manualHora" class="form-control form-control-sm shadow-none" step="1" required title="Incluya hora, minutos y segundos">
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold" for="manualMotivo">Motivo / Sustento <span class="text-danger">*</span></label>
+                    <input type="text" id="manualMotivo" class="form-control form-control-sm shadow-none" placeholder="Ej: Olvido de fotocheck" required maxlength="255" autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm px-4" id="btnGuardarMarcaManual" onclick="guardarMarcaManual()"><i class="bi bi-save"></i> Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+let lastMarcasExcelPayload = null;
+
+document.addEventListener('DOMContentLoaded', function () {
+    const hoy = new Date();
+    const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    const fi = document.getElementById('fechaInicio');
+    const ff = document.getElementById('fechaFin');
+    if (fi && !fi.value) fi.value = primerDia.toISOString().split('T')[0];
+    if (ff && !ff.value) ff.value = hoy.toISOString().split('T')[0];
+
+    const ciaEl = document.getElementById('cia');
+    if (ciaEl && ciaEl.value) {
+        poblarTrabajadores(ciaEl.value);
+    }
+    if (ciaEl) {
+        ciaEl.addEventListener('change', function () {
+            poblarTrabajadores(this.value);
+        });
+    }
+});
+
+function setRowCountMarcas(n) {
+    const el = document.getElementById('lblRowCountMarcas');
+    if (!el) return;
+    const num = Math.max(0, parseInt(n, 10) || 0);
+    el.textContent = num === 1 ? '1 registro' : num + ' registros';
+}
+
+function selectedOptionText(selectEl) {
+    const opt = selectEl && selectEl.options ? selectEl.options[selectEl.selectedIndex] : null;
+    return opt ? String(opt.textContent || '').trim() : '';
+}
+
+function normalizeCell(v) {
+    return v == null ? '' : String(v).trim();
+}
+
+async function exportMarcasExcel(data, meta) {
+    if (typeof ExcelJS === 'undefined') {
+        alert('No se pudo cargar la librería de Excel (ExcelJS). Recargue la página e intente de nuevo.');
+        return;
+    }
+    const header = ['DNI', 'NOMBRE', 'DÍA', 'FECHA', 'HORA', 'CARGO'];
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Marcas', { views: [{ showGridLines: true }] });
+
+    const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+    const borderThin = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+    const allBorders = { top: borderThin, left: borderThin, bottom: borderThin, right: borderThin };
+
+    ws.mergeCells(1, 1, 1, header.length);
+    const t = ws.getCell(1, 1);
+    t.value = 'LISTADO DE MARCAS';
+    t.font = { bold: true, size: 14 };
+    t.alignment = { horizontal: 'center', vertical: 'middle' };
+    t.fill = fill('FFE9ECEF');
+    t.border = allBorders;
+    ws.getRow(1).height = 26;
+
+    const metaRow = ws.addRow([
+        'Compañía', meta.compania || '',
+        'Trabajador', meta.trabajador || '',
+        'F. Inicio', meta.fechaini || '',
+        'F. Fin', meta.fechafin || '',
+        '', ''
+    ]);
+    metaRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        if (colNumber <= 8) {
+            cell.fill = fill('FFF8F9FA');
+            cell.font = { bold: colNumber % 2 === 1 };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+        cell.border = allBorders;
+    });
+
+    ws.addRow([]);
+
+    const h = ws.addRow(header);
+    h.font = { bold: true };
+    h.eachCell((cell) => {
+        cell.fill = fill('FFF8F9FA');
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = allBorders;
+    });
+
+    data.forEach((row) => {
+        const r = ws.addRow([
+            normalizeCell(row.dni),
+            normalizeCell(row.nombre),
+            normalizeCell(row.dia),
+            normalizeCell(row.fecha),
+            normalizeCell(row.hora),
+            normalizeCell(row.cargo),
+        ]);
+        r.eachCell((cell, colNumber) => {
+            cell.border = allBorders;
+            cell.fill = fill('FFFFFFFF');
+            if ([1, 3, 4, 5].includes(colNumber)) {
+                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            } else {
+                cell.alignment = { horizontal: 'left', vertical: 'middle' };
+            }
+        });
+    });
+
+    ws.getColumn(1).width = 12;
+    ws.getColumn(2).width = 32;
+    ws.getColumn(3).width = 12;
+    ws.getColumn(4).width = 14;
+    ws.getColumn(5).width = 10;
+    ws.getColumn(6).width = 28;
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const safe = (s) => String(s || 'export').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 80);
+    a.href = url;
+    a.download = `marcas_${safe(meta.compania)}_${stamp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function pickRow(row, names) {
+    if (!row || typeof row !== 'object') return '';
+    for (let i = 0; i < names.length; i++) {
+        const n = names[i];
+        if (Object.prototype.hasOwnProperty.call(row, n) && row[n] != null && row[n] !== '') return row[n];
+        const found = Object.keys(row).find(function (k) { return k.toLowerCase() === n.toLowerCase(); });
+        if (found != null && row[found] != null && row[found] !== '') return row[found];
+    }
+    return '';
+}
+
+async function poblarTrabajadores(cia) {
+    const sel = document.getElementById('person');
+    if (!sel) return;
+    if (!cia) {
+        sel.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+        sel.disabled = true;
+        return;
+    }
+    sel.innerHTML = '<option value="">Cargando…</option>';
+    sel.disabled = true;
+    try {
+        const res = await fetch('/api/selectores/trabajadores?cia=' + encodeURIComponent(cia));
+        const data = await res.json();
+        sel.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+        (Array.isArray(data) ? data : []).forEach(function (item) {
+            const opt = document.createElement('option');
+            opt.value = item.id != null ? String(item.id) : '';
+            opt.textContent = item.text != null ? String(item.text) : '';
+            sel.appendChild(opt);
+        });
+        sel.disabled = false;
+    } catch (e) {
+        console.error(e);
+        sel.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+        sel.disabled = false;
+    }
+}
+
+function photosBaseUrl() {
+    const root = document.getElementById('marcasRoot');
+    const b = root && root.dataset ? root.dataset.photosBase : '/FOTOS';
+    return (b || '/FOTOS').replace(/\/$/, '');
+}
+
+function horaLocalAhoraHHMMSS() {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' +
+        String(d.getMinutes()).padStart(2, '0') + ':' +
+        String(d.getSeconds()).padStart(2, '0');
+}
+
+/** Hora en listado/Excel: hh:mm:ss; usa FechaHoraIngreso si la columna Hora no trae segundos. */
+function formatHoraConSegundos(horaRaw, fhRaw) {
+    const h = String(horaRaw == null ? '' : horaRaw).trim();
+    const mss = h.match(/^(\d{1,2}):(\d{2}):(\d{2})/);
+    if (mss) {
+        return String(parseInt(mss[1], 10)).padStart(2, '0') + ':' + mss[2] + ':' + mss[3];
+    }
+    if (fhRaw) {
+        try {
+            const d = new Date(fhRaw);
+            if (!isNaN(d.getTime())) {
+                return String(d.getHours()).padStart(2, '0') + ':' +
+                    String(d.getMinutes()).padStart(2, '0') + ':' +
+                    String(d.getSeconds()).padStart(2, '0');
+            }
+        } catch (ex) { /* ignore */ }
+    }
+    const mhm = h.match(/^(\d{1,2}):(\d{2})$/);
+    if (mhm) {
+        return String(parseInt(mhm[1], 10)).padStart(2, '0') + ':' + mhm[2] + ':00';
+    }
+    return h;
+}
+
+function buildFotoUrl(rutaFoto) {
+    const s = String(rutaFoto || '').trim().replace(/\\/g, '/');
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    let rel = s.replace(/^\/+/, '');
+    rel = rel.replace(/^FOTOS\//i, '');
+    const parts = rel.split('/').filter(Boolean).map(function (p) { return encodeURIComponent(p); });
+    const base = photosBaseUrl().replace(/\/$/, '');
+    if (!parts.length) return base;
+    return base + '/' + parts.join('/');
+}
+
+document.getElementById('frmFiltros').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const cia = document.getElementById('cia').value;
+    const fechaInicio = document.getElementById('fechaInicio').value;
+    const fechaFin = document.getElementById('fechaFin').value;
+    const person = document.getElementById('person').value || '0';
+    const btnExport = document.getElementById('btnExportMarcasExcel');
+
+    const tbody = document.getElementById('tablaMarcasBody');
+
+    if (fechaInicio > fechaFin) {
+        alert('La fecha inicio no puede ser mayor que la fecha fin.');
+        return;
+    }
+
+    lastMarcasExcelPayload = null;
+    if (btnExport) btnExport.disabled = true;
+    setRowCountMarcas(0);
+
+    try {
+        const response = await fetch('/api/marcas/listar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cia: cia, fechaInicio: fechaInicio, fechaFin: fechaFin, person: person })
+        });
+        const result = await response.json();
+        tbody.innerHTML = '';
+
+        if (!response.ok || !result.success) {
+            setRowCountMarcas(0);
+            alert(result.error || 'No se pudo cargar el listado.');
+            return;
+        }
+
+        const rows = Array.isArray(result.data) ? result.data : [];
+        setRowCountMarcas(rows.length);
+
+        const exportRows = [];
+
+        rows.forEach(function (row) {
+            const dni = pickRow(row, ['DNI', 'dni']);
+            const nombre = pickRow(row, ['Nombre', 'nombre']);
+            const diaSem = pickRow(row, ['diasemana', 'DiaSemana']);
+            const fh = pickRow(row, ['FechaHoraIngreso', 'fechahoraingreso']);
+            const hora = pickRow(row, ['hora', 'Hora']);
+            const cargo = pickRow(row, ['cargo', 'Cargo']);
+            const rutaFoto = pickRow(row, ['RutaFoto', 'rutafoto']);
+            const horaDisplay = formatHoraConSegundos(hora, fh);
+
+            let fechaStr = '';
+            if (fh) {
+                try {
+                    const d = new Date(fh);
+                    if (!isNaN(d.getTime())) fechaStr = d.toLocaleDateString('es-PE');
+                    else fechaStr = String(fh).split(' ')[0] || '';
+                } catch (ex) {
+                    fechaStr = String(fh);
+                }
+            }
+
+            exportRows.push({
+                dni: dni,
+                nombre: nombre,
+                dia: diaSem,
+                fecha: fechaStr,
+                hora: horaDisplay,
+                cargo: cargo
+            });
+
+            let evidenciaHtml = '';
+            if (rutaFoto) {
+                const rf = escapeHtml(String(rutaFoto));
+                const nomEsc = escapeHtml(String(nombre));
+                evidenciaHtml = '<button type="button" class="btn btn-link btn-sm text-dark p-0" data-ruta="' + rf + '" data-nombre="' + nomEsc + '" title="Ver foto">' +
+                    '<i class="bi bi-image fs-6"></i></button>';
+            } else {
+                evidenciaHtml = '<i class="bi bi-image text-muted opacity-25 fs-6" title="Sin foto"></i>';
+            }
+
+            const tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td class="text-start ps-3 text-muted">' + escapeHtml(dni) + '</td>' +
+                '<td class="text-start fw-bold" style="color: #475569;">' + escapeHtml(nombre) + '</td>' +
+                '<td>' + escapeHtml(diaSem) + '</td>' +
+                '<td>' + escapeHtml(fechaStr) + '</td>' +
+                '<td class="fw-bold">' + escapeHtml(horaDisplay) + '</td>' +
+                '<td class="text-start text-muted" style="font-size: 0.75rem;">' + escapeHtml(cargo) + '</td>' +
+                '<td>' + evidenciaHtml + '</td>';
+            const btn = tr.querySelector('button[data-ruta]');
+            if (btn) {
+                btn.addEventListener('click', function () {
+                    verEvidencia(this.getAttribute('data-ruta'), this.getAttribute('data-nombre'));
+                });
+            }
+            tbody.appendChild(tr);
+        });
+
+        if (rows.length && btnExport) {
+            lastMarcasExcelPayload = {
+                data: exportRows,
+                meta: {
+                    compania: selectedOptionText(document.getElementById('cia')),
+                    trabajador: selectedOptionText(document.getElementById('person')) || 'TODOS LOS TRABAJADORES',
+                    fechaini: fechaInicio,
+                    fechafin: fechaFin
+                }
+            };
+            btnExport.disabled = false;
+        }
+    } catch (error) {
+        console.error(error);
+        setRowCountMarcas(0);
+        document.getElementById('tablaMarcasBody').innerHTML = '';
+        lastMarcasExcelPayload = null;
+        if (btnExport) btnExport.disabled = true;
+        alert('Error de red al cargar las marcas.');
+    }
+});
+
+document.getElementById('btnExportMarcasExcel').addEventListener('click', async function () {
+    if (!lastMarcasExcelPayload || !lastMarcasExcelPayload.data || !lastMarcasExcelPayload.data.length) {
+        alert('Ejecute primero una consulta con resultados.');
+        return;
+    }
+    try {
+        await exportMarcasExcel(lastMarcasExcelPayload.data, lastMarcasExcelPayload.meta);
+    } catch (err) {
+        console.error(err);
+        alert('No se pudo generar el archivo Excel.');
+    }
+});
+
+function verEvidencia(rutaFoto, nombre) {
+    document.getElementById('modalEvidenciaTitulo').innerText = 'Evidencia: ' + (nombre || '');
+    const errEl = document.getElementById('imgEvidenciaError');
+    const img = document.getElementById('imgEvidencia');
+    if (errEl) errEl.classList.add('d-none');
+    const url = buildFotoUrl(rutaFoto);
+    img.onload = function () { if (errEl) errEl.classList.add('d-none'); };
+    img.onerror = function () { if (errEl) errEl.classList.remove('d-none'); };
+    img.src = url;
+    const modal = new bootstrap.Modal(document.getElementById('modalEvidencia'));
+    modal.show();
+}
+
+function syncSelectOptions(fromSelect, toSelect) {
+    toSelect.innerHTML = '';
+    Array.prototype.forEach.call(fromSelect.options, function (opt) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.textContent;
+        toSelect.appendChild(o);
+    });
+}
+
+function abrirModalManual() {
+    const person = document.getElementById('person');
+    const manual = document.getElementById('trabajadorManual');
+    if (person && manual) {
+        syncSelectOptions(person, manual);
+        const pv = String(person.value || '').trim();
+        if (pv && pv !== '0') {
+            manual.value = pv;
+            const ok = Array.prototype.some.call(manual.options, function (o) { return String(o.value) === pv; });
+            if (!ok) manual.selectedIndex = 0;
+        }
+    }
+    const hoy = new Date().toISOString().split('T')[0];
+    const mf = document.getElementById('manualFecha');
+    const mh = document.getElementById('manualHora');
+    if (mf) mf.value = hoy;
+    if (mh) mh.value = horaLocalAhoraHHMMSS();
+    const mot = document.getElementById('manualMotivo');
+    if (mot) mot.value = '';
+    const modal = new bootstrap.Modal(document.getElementById('modalManual'));
+    modal.show();
+}
+
+async function guardarMarcaManual() {
+    const cia = document.getElementById('cia').value;
+    const person = (document.getElementById('trabajadorManual') || {}).value || '';
+    const fecha = (document.getElementById('manualFecha') || {}).value || '';
+    const hora = (document.getElementById('manualHora') || {}).value || '';
+    const motivo = (document.getElementById('manualMotivo') || {}).value.trim() || '';
+
+    if (!person || person === '0') {
+        alert('Seleccione un trabajador distinto de «Todos los trabajadores».');
+        return;
+    }
+    if (!fecha || !hora) {
+        alert('Indique fecha y hora.');
+        return;
+    }
+    if (!motivo) {
+        alert('El motivo / sustento es obligatorio.');
+        return;
+    }
+
+    const btn = document.getElementById('btnGuardarMarcaManual');
+    if (btn) {
+        btn.disabled = true;
+        btn.dataset._prevHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando…';
+    }
+    try {
+        const res = await fetch('/api/marcas/manual', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cia: cia, person: person, fecha: fecha, hora: hora, motivo: motivo })
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok || !data.success) {
+            alert(data.error || 'No se pudo guardar la marca manual.');
+            return;
+        }
+        const modalEl = document.getElementById('modalManual');
+        const inst = modalEl && bootstrap.Modal.getInstance(modalEl);
+        if (inst) inst.hide();
+        document.getElementById('frmFiltros').requestSubmit();
+    } catch (e) {
+        console.error(e);
+        alert('Error de red al guardar.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            if (btn.dataset._prevHtml) btn.innerHTML = btn.dataset._prevHtml;
+        }
+    }
+}
+</script>
+{% endblock %}

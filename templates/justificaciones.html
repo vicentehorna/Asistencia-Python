@@ -1,0 +1,215 @@
+{% extends "layout.html" %}
+
+{% block title %}Tipos de Justificación{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="row g-3">
+        <!-- Panel registro (izquierda, estilo feriados) -->
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100" style="border-top: 3px solid #64748b !important;">
+                <div class="card-header bg-white py-2">
+                    <h6 class="mb-0 fw-bold" style="color: #475569;">
+                        <i class="bi bi-journal-plus me-2"></i>Nuevo / Editar Tipo
+                    </h6>
+                </div>
+                <div class="card-body bg-white">
+                    <input type="hidden" id="idJustificacion" value="">
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted" style="font-size: 0.75rem;" for="descripcion">DESCRIPCIÓN</label>
+                        <input type="text" id="descripcion" class="form-control form-control-sm border-light-subtle" placeholder="Ej: Descanso Médico" autocomplete="off">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted" style="font-size: 0.75rem;" for="abreviatura">ABREVIATURA</label>
+                        <input type="text" id="abreviatura" class="form-control form-control-sm border-light-subtle" maxlength="20" placeholder="Ej: DM" autocomplete="off">
+                    </div>
+
+                    <div class="mb-3 d-flex align-items-center">
+                        <div class="form-check form-switch p-0 ps-5">
+                            <input class="form-check-input" type="checkbox" id="esDiaCompleto">
+                            <label class="form-check-label small fw-bold text-secondary" for="esDiaCompleto" style="font-size: 0.75rem;">Es día completo</label>
+                        </div>
+                    </div>
+                    <div class="mb-3 d-flex align-items-center">
+                        <div class="form-check form-switch p-0 ps-5">
+                            <input class="form-check-input" type="checkbox" id="pagaHaber">
+                            <label class="form-check-label small fw-bold text-secondary" for="pagaHaber" style="font-size: 0.75rem;">Paga haber</label>
+                        </div>
+                    </div>
+                    <div class="mb-3 d-flex align-items-center">
+                        <div class="form-check form-switch p-0 ps-5">
+                            <input class="form-check-input" type="checkbox" id="requiereSustento">
+                            <label class="form-check-label small fw-bold text-secondary" for="requiereSustento" style="font-size: 0.75rem;">Requiere sustento</label>
+                        </div>
+                    </div>
+
+                    <div class="pt-2 border-top d-flex flex-wrap gap-2 justify-content-start">
+                        <button type="button" class="btn btn-success btn-sm px-4 shadow-sm" onclick="limpiarFormulario()">
+                            <i class="bi bi-plus-lg"></i> Nuevo
+                        </button>
+                        <button type="button" class="btn btn-primary btn-sm px-4" onclick="guardarJustificacion()">
+                            <i class="bi bi-save"></i> Guardar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Listado compacto (derecha) -->
+        <div class="col-md-8">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center border-bottom">
+                    <h6 class="mb-0 fw-bold text-secondary"><i class="bi bi-list-stars me-2"></i>TIPOS REGISTRADOS</h6>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-link btn-sm text-muted p-0" onclick="location.reload()" title="Recargar" aria-label="Recargar">
+                            <i class="bi bi-arrow-clockwise fs-5"></i>
+                        </button>
+                        <span class="small text-muted fst-italic">{{ justificaciones|length }} reg.</span>
+                    </div>
+                </div>
+                <div class="card-body p-0" style="max-height: 70vh; overflow-y: auto;">
+                    <table class="table table-sm table-hover mb-0" style="font-size: 0.75rem;">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th class="ps-3 py-2">Descripción</th>
+                                <th style="width: 72px;">Abrev.</th>
+                                <th class="text-center py-2" style="width: 56px;">D.C.</th>
+                                <th class="text-center py-2" style="width: 56px;">Haber</th>
+                                <th class="text-center py-2" style="width: 56px;">Sust.</th>
+                                <th class="text-center py-2" style="width: 72px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for j in justificaciones %}
+                            <tr>
+                                <td class="ps-3 align-middle fw-bold">{{ j.Descripcion or '' }}</td>
+                                <td class="align-middle text-primary fw-bold text-nowrap">{{ j.Abreviatura or '' }}</td>
+                                <td class="text-center align-middle py-1">
+                                    <span class="fw-bold" style="color: {{ '#10b981' if j.EsDiaCompleto else '#ef4444' }};">{{ 'Sí' if j.EsDiaCompleto else 'No' }}</span>
+                                </td>
+                                <td class="text-center align-middle py-1">
+                                    <span class="fw-bold" style="color: {{ '#10b981' if j.PagaHaber else '#ef4444' }};">{{ 'Sí' if j.PagaHaber else 'No' }}</span>
+                                </td>
+                                <td class="text-center align-middle py-1">
+                                    <span class="fw-bold" style="color: {{ '#10b981' if j.RequiereSustento else '#ef4444' }};">{{ 'Sí' if j.RequiereSustento else 'No' }}</span>
+                                </td>
+                                <td class="text-center align-middle py-1">
+                                    <button type="button" class="btn btn-link btn-sm text-dark p-0 me-1" onclick="editarJustificacion({{ j.IdJustificacion }})" title="Editar">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-link btn-sm text-danger p-0" onclick="eliminarJustificacion({{ j.IdJustificacion }})" title="Eliminar">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="application/json" id="justificaciones-data">{{ justificaciones|tojson }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    function parseLista() {
+        const el = document.getElementById('justificaciones-data');
+        if (!el || !el.textContent) return [];
+        try {
+            const data = JSON.parse(el.textContent);
+            return Array.isArray(data) ? data : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function bitSi(v) {
+        return v === true || v === 1 || v === '1' || String(v).toUpperCase() === 'Y';
+    }
+
+    window.limpiarFormulario = function () {
+        document.getElementById('idJustificacion').value = '';
+        document.getElementById('descripcion').value = '';
+        document.getElementById('abreviatura').value = '';
+        document.getElementById('esDiaCompleto').checked = false;
+        document.getElementById('pagaHaber').checked = false;
+        document.getElementById('requiereSustento').checked = false;
+    };
+
+    window.editarJustificacion = function (id) {
+        const lista = parseLista();
+        const row = lista.find(function (x) {
+            return Number(x.IdJustificacion) === Number(id);
+        });
+        if (!row) {
+            alert('No se encontró el registro.');
+            return;
+        }
+        document.getElementById('idJustificacion').value = String(row.IdJustificacion || '');
+        document.getElementById('descripcion').value = row.Descripcion || '';
+        document.getElementById('abreviatura').value = row.Abreviatura || '';
+        document.getElementById('esDiaCompleto').checked = bitSi(row.EsDiaCompleto);
+        document.getElementById('pagaHaber').checked = bitSi(row.PagaHaber);
+        document.getElementById('requiereSustento').checked = bitSi(row.RequiereSustento);
+        const panel = document.querySelector('.col-md-4 .card-body');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    window.guardarJustificacion = async function () {
+        const payload = {
+            descripcion: document.getElementById('descripcion').value.trim(),
+            abreviatura: document.getElementById('abreviatura').value.trim(),
+            esDiaCompleto: document.getElementById('esDiaCompleto').checked,
+            pagaHaber: document.getElementById('pagaHaber').checked,
+            requiereSustento: document.getElementById('requiereSustento').checked
+        };
+        const id = document.getElementById('idJustificacion').value.trim();
+        if (id) payload.idJustificacion = parseInt(id, 10);
+
+        if (!payload.descripcion) {
+            alert('Indique la descripción.');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/justificaciones/guardar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                location.reload();
+                return;
+            }
+            alert(data.error || 'No se pudo guardar.');
+        } catch (e) {
+            console.error(e);
+            alert('Error de red o del servidor.');
+        }
+    };
+
+    window.eliminarJustificacion = async function (id) {
+        if (!confirm('¿Eliminar este tipo de justificación?')) return;
+        try {
+            const res = await fetch('/api/justificaciones/eliminar/' + encodeURIComponent(id), { method: 'DELETE' });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                location.reload();
+                return;
+            }
+            alert('No se pudo eliminar el registro.');
+        } catch (e) {
+            console.error(e);
+            alert('Error de red o del servidor.');
+        }
+    };
+})();
+</script>
+{% endblock %}

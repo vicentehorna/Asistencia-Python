@@ -21,6 +21,11 @@ from database import (
     get_companias_selector,
     get_horarios_resumen_por_compania,
     get_horario_detalle_api,
+    get_listado_marcas,
+    insert_registro_asistencia_manual,
+    get_tipos_justificacion,
+    guardar_tipo_justificacion,
+    eliminar_tipo_justificacion,
 )
 
 load_dotenv()
@@ -199,6 +204,27 @@ def _companias_permitidas_ids():
     return {str(c.get('id', '')).strip() for c in get_companias_selector() if c.get('id') is not None}
 
 
+def _marcas_fotos_base_url():
+    """
+    URL base del virtual directory FOTOS en IIS.
+    Si se deja como ruta relativa (/FOTOS), el navegador pide la imagen al mismo host/puerto que Flask
+    y falla si las fotos solo están en IIS. Use URL absoluta (https://servidor/FOTOS).
+    """
+    explicit = (os.getenv("MARCAS_FOTOS_BASE_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    srv = (os.getenv("SQL_SERVER") or "").strip()
+    if srv:
+        host = srv.split("\\")[0].strip()
+        host = host.split(":")[0].strip() if host else ""
+        if host and host.lower() not in ("localhost", "127.0.0.1", "(local)"):
+            scheme = (os.getenv("MARCAS_FOTOS_SCHEME") or "https").strip().lower()
+            if scheme not in ("http", "https"):
+                scheme = "https"
+            return f"{scheme}://{host}/FOTOS".rstrip("/")
+    return "/FOTOS"
+
+
 @app.route('/maestro-horarios')
 @login_required
 def maestro_horarios():
@@ -242,7 +268,26 @@ def api_horario_detalle(id_horario):
 @app.route('/tipos-justificacion')
 @login_required
 def tipos_justificacion():
-    return _en_desarrollo('Tipos de Justificación')
+    lista = get_tipos_justificacion()
+    return render_template('justificaciones.html', justificaciones=lista)
+
+
+@app.route('/api/justificaciones/guardar', methods=['POST'])
+@login_required
+def api_guardar_justificacion():
+    data = request.get_json(silent=True) or {}
+    usuario = str(getattr(current_user, 'username', '') or getattr(current_user, 'id', '') or '')[:20]
+    ok, err = guardar_tipo_justificacion(data, usuario)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": err or 'No se pudo guardar.'}), 400
+
+
+@app.route('/api/justificaciones/eliminar/<int:id_justificacion>', methods=['DELETE'])
+@login_required
+def api_eliminar_justificacion(id_justificacion):
+    ok = eliminar_tipo_justificacion(id_justificacion)
+    return jsonify({"success": ok})
 
 
 @app.route('/feriados')
@@ -302,7 +347,80 @@ def api_guardar_horario():
 @app.route('/gestion-marcas')
 @login_required
 def gestion_marcas():
-    return _en_desarrollo('Gestión de Marcas')
+    ensure_user_session()
+    raw = get_companias_selector()
+    companies = [{"id": str(c.get("id", "")), "name": c.get("text", "")} for c in raw if c.get("id") is not None]
+    default_company = str(session.get("company") or "").strip()
+    if companies and default_company:
+        ids = {c["id"] for c in companies}
+        if default_company not in ids:
+            default_company = companies[0]["id"]
+    elif companies:
+        default_company = companies[0]["id"]
+    else:
+        default_company = ""
+    photos_base = _marcas_fotos_base_url()
+    return render_template(
+        "marcas.html",
+        companies=companies,
+        default_company=default_company,
+        photos_base=photos_base,
+    )
+
+
+@app.route("/api/marcas/listar", methods=["POST"])
+@login_required
+def api_listar_marcas():
+    data = request.get_json(silent=True) or {}
+    cia = (data.get("cia") or "").strip()
+    fecha_inicio = data.get("fechaInicio") or data.get("fechaini")
+    fecha_fin = data.get("fechaFin") or data.get("fechafin")
+    person = (data.get("person") or "0").strip() or "0"
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    if not fecha_inicio or not fecha_fin:
+        return jsonify({"success": False, "error": "Indique fecha inicio y fin.", "data": []}), 400
+    if str(fecha_inicio) > str(fecha_fin):
+        return jsonify({"success": False, "error": "La fecha inicio no puede ser mayor que la fecha fin.", "data": []}), 400
+
+    rows, err = get_listado_marcas(cia, fecha_inicio, fecha_fin, person)
+    if err:
+        return jsonify({"success": False, "error": err, "data": []}), 500
+    return jsonify({"success": True, "data": rows})
+
+
+@app.route("/api/marcas/manual", methods=["POST"])
+@login_required
+def api_marca_manual():
+    """Registra marca manual en dbo.RegistroAsistencia."""
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = (body.get("cia") or "").strip()
+    person = (body.get("person") or "").strip()
+    fecha = (body.get("fecha") or "").strip()
+    hora = (body.get("hora") or "").strip()
+    motivo = (body.get("motivo") or "").strip()
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not person or person == "0":
+        return jsonify({"success": False, "error": "Seleccione un trabajador (no use «Todos»)."}), 400
+    if not fecha or not hora:
+        return jsonify({"success": False, "error": "Indique fecha y hora."}), 400
+    if not motivo:
+        return jsonify({"success": False, "error": "El motivo / sustento es obligatorio."}), 400
+
+    usuario = str(
+        getattr(current_user, "username", None)
+        or getattr(current_user, "id", None)
+        or ""
+    )[:20]
+
+    ok, err = insert_registro_asistencia_manual(cia, person, fecha, hora, motivo, usuario)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": err or "No se pudo guardar la marca manual."}), 500
 
 
 @app.route('/justificaciones')

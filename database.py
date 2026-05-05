@@ -516,6 +516,111 @@ def eliminar_feriado(id_feriado):
         return False
 
 
+def get_tipos_justificacion():
+    """Lista de CA_TipoJustificacion ordenada por descripción."""
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT IdJustificacion, Descripcion, Abreviatura,
+                   EsDiaCompleto, PagaHaber, RequiereSustento
+            FROM CA_TipoJustificacion
+            ORDER BY Descripcion
+            """
+        )
+        cols = [c[0] for c in cursor.description]
+        rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"Error en get_tipos_justificacion: {e}")
+        return []
+
+
+def guardar_tipo_justificacion(data, usuario):
+    """
+    INSERT o UPDATE en CA_TipoJustificacion.
+    data: descripcion, abreviatura, esDiaCompleto, pagaHaber, requiereSustento, idJustificacion (opcional).
+    usuario: texto para xlastuser (máx. 20).
+    Retorna (True, None) o (False, mensaje).
+    """
+    if not isinstance(data, dict):
+        return False, 'Datos inválidos.'
+
+    descripcion = (data.get('descripcion') or '').strip()
+    abreviatura = (data.get('abreviatura') or '').strip()[:20]
+    if not descripcion:
+        return False, 'La descripción es obligatoria.'
+
+    es_dia = 1 if data.get('esDiaCompleto') else 0
+    paga = 1 if data.get('pagaHaber') else 0
+    req = 1 if data.get('requiereSustento') else 0
+    user = (str(usuario) if usuario is not None else '')[:20]
+
+    jid = data.get('idJustificacion') if data.get('idJustificacion') is not None else data.get('id')
+    if jid is not None and str(jid).strip() != '':
+        try:
+            jid = int(jid)
+        except (TypeError, ValueError):
+            jid = None
+    else:
+        jid = None
+
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        if jid is not None and jid > 0:
+            cursor.execute(
+                """
+                UPDATE CA_TipoJustificacion
+                SET Descripcion = ?, Abreviatura = ?, EsDiaCompleto = ?, PagaHaber = ?, RequiereSustento = ?,
+                    xlastuser = ?, xlastdate = GETDATE()
+                WHERE IdJustificacion = ?
+                """,
+                (descripcion, abreviatura or None, es_dia, paga, req, user, jid),
+            )
+            if cursor.rowcount == 0:
+                cursor.close()
+                conn.close()
+                return False, 'No se encontró el registro a actualizar.'
+        else:
+            cursor.execute(
+                """
+                INSERT INTO CA_TipoJustificacion
+                    (Descripcion, Abreviatura, EsDiaCompleto, PagaHaber, RequiereSustento, xlastuser, xlastdate)
+                VALUES (?, ?, ?, ?, ?, ?, GETDATE())
+                """,
+                (descripcion, abreviatura or None, es_dia, paga, req, user),
+            )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, None
+    except Exception as e:
+        print(f"Error en guardar_tipo_justificacion: {e}")
+        return False, str(e)
+
+
+def eliminar_tipo_justificacion(id_justificacion):
+    """Elimina un tipo de justificación por IdJustificacion."""
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM CA_TipoJustificacion WHERE IdJustificacion = ?",
+            (int(id_justificacion),),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error en eliminar_tipo_justificacion: {e}")
+        return False
+
+
 DIAS_HORARIO_ORDEN = [
     'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo',
 ]
@@ -545,6 +650,194 @@ def get_companias_selector():
     except Exception as e:
         print(f"Error en get_companias_selector: {e}")
         return []
+
+
+def _valor_json_marcas(v):
+    """Serializa valores de filas para respuestas JSON."""
+    if v is None:
+        return None
+    from datetime import date, datetime as dt
+    from decimal import Decimal
+    if isinstance(v, dt):
+        return v.isoformat(sep=' ', timespec='seconds')
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, bytes):
+        try:
+            return v.decode('utf-8')
+        except Exception:
+            return str(v)
+    return v
+
+
+def get_listado_marcas(cia, fecha_inicio, fecha_fin, person):
+    """
+    Ejecuta sp_pr_listadomarcas_web.
+    Retorna (lista_de_dicts_serializables, None) o ([], mensaje_error).
+    """
+    if not cia or not str(cia).strip():
+        return [], 'Indique la compañía.'
+    if not fecha_inicio or not fecha_fin:
+        return [], 'Indique fecha inicio y fecha fin.'
+    pers = (str(person).strip() if person is not None else '') or '0'
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC dbo.sp_pr_listadomarcas_web @cia=?, @Fechainicio=?, @FechaFin=?, @person=?",
+            (str(cia).strip(), fecha_inicio, fecha_fin, pers),
+        )
+        if not cursor.description:
+            cursor.close()
+            conn.close()
+            return [], None
+        cols = [c[0] for c in cursor.description]
+        out = []
+        for row in cursor.fetchall():
+            rd = dict(zip(cols, row))
+            out.append({k: _valor_json_marcas(val) for k, val in rd.items()})
+        cursor.close()
+        conn.close()
+        return out, None
+    except Exception as e:
+        print(f"Error en get_listado_marcas: {e}")
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return [], str(e)
+
+
+def _parse_fecha_hora_marca_manual(fecha_str, hora_str):
+    """Combina fecha (YYYY-MM-DD) y hora (HH:MM o HH:MM:SS) en datetime."""
+    from datetime import datetime
+
+    if not fecha_str or not str(fecha_str).strip():
+        raise ValueError("Indique la fecha.")
+    h = (hora_str or "").strip()
+    if not h:
+        raise ValueError("Indique la hora (incluya segundos si aplica).")
+    if "." in h:
+        h = h.split(".", 1)[0]
+    parts = h.split(":")
+    if len(parts) == 2:
+        h = f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:00"
+    elif len(parts) == 3:
+        h = f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(2)}"
+    fecha = str(fecha_str).strip()[:10]
+    return datetime.strptime(f"{fecha} {h}", "%Y-%m-%d %H:%M:%S")
+
+
+def _lookup_id_trabajador_por_person(cursor, person, company):
+    """
+    Obtiene IdTrabajador desde dbo.Trabajadores.
+    Si no hay coincidencia, retorna 1 (valor por defecto indicado en requerimiento).
+    """
+    person = str(person).strip()
+    company_cmp = str(company).strip()[:4] if company else ""
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 IdTrabajador
+            FROM dbo.Trabajadores
+            WHERE LTRIM(RTRIM(CAST(Person AS VARCHAR(50)))) = ?
+              AND LTRIM(RTRIM(CAST(company AS CHAR(4)))) = ?
+            """,
+            (person, company_cmp),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+    except Exception:
+        pass
+    try:
+        cursor.execute(
+            """
+            SELECT TOP 1 IdTrabajador
+            FROM dbo.Trabajadores
+            WHERE LTRIM(RTRIM(CAST(Person AS VARCHAR(50)))) = ?
+            """,
+            (person,),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+    except Exception:
+        pass
+    return 1
+
+
+def insert_registro_asistencia_manual(cia, person, fecha_str, hora_str, motivo, xlastuser):
+    """
+    Inserta una marca manual en dbo.RegistroAsistencia.
+    RutaFoto NULL, flagmanual 'Y', MotivoManual según usuario.
+    IdTrabajador: lookup por Person/company; si no existe fila, 1.
+    """
+    from datetime import datetime
+
+    conn = None
+    try:
+        fh = _parse_fecha_hora_marca_manual(fecha_str, hora_str)
+    except ValueError as e:
+        return False, str(e)
+
+    person_db = str(person).strip()[:20] if person else ""
+    if not person_db:
+        return False, "Seleccione un trabajador."
+
+    motivo_stripped = (motivo or "").strip()
+    if not motivo_stripped:
+        return False, "El motivo / sustento es obligatorio."
+
+    company_db = str(cia).strip()[:4].ljust(4)[:4]
+    motivo_db = motivo_stripped[:255]
+    user_db = str(xlastuser or "").strip()[:20] if xlastuser else None
+    now = datetime.now().replace(microsecond=0)
+
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        id_trab = _lookup_id_trabajador_por_person(
+            cursor, person_db, str(cia).strip()[:4]
+        )
+        cursor.execute(
+            """
+            INSERT INTO dbo.RegistroAsistencia (
+                IdTrabajador,
+                FechaHoraIngreso,
+                RutaFoto,
+                Person,
+                company,
+                xlastuser,
+                xlastdate,
+                flagmanual,
+                MotivoManual
+            )
+            VALUES (?, ?, NULL, ?, ?, ?, ?, 'Y', ?)
+            """,
+            (id_trab, fh, person_db, company_db, user_db, now, motivo_db),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, None
+    except Exception as e:
+        print(f"Error en insert_registro_asistencia_manual: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return False, str(e)
 
 
 def _format_time_for_input(val):

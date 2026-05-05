@@ -41,13 +41,16 @@
                 </select>
             </div>
 
-            <div class="col-12 d-flex gap-2 border-top pt-3 mt-3">
-                <button type="submit" class="btn btn-primary btn-sm px-4">
-                    <i class="bi bi-search"></i> Consultar
-                </button>
-                <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcel" disabled>
-                    <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
-                </button>
+            <div class="col-12 border-top pt-3 mt-3">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm px-4">
+                        <i class="bi bi-search"></i> Consultar
+                    </button>
+                    <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcel" disabled>
+                        <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
+                    </button>
+                    <span class="ms-auto small text-muted fw-bold" id="lblRowCount">0 registros</span>
+                </div>
             </div>
         </form>
     </div>
@@ -94,7 +97,14 @@ document.addEventListener('DOMContentLoaded', async function () {
     const btnExportExcel = document.getElementById('btnExportExcel');
     const tbody = document.getElementById('tbody-resumen-asistencia');
     const cardResultado = document.getElementById('cardResultado');
+    const lblRowCount = document.getElementById('lblRowCount');
     let lastResumenAsistenciaExport = null;
+
+    function setRowCount(n) {
+        const num = Math.max(0, parseInt(n, 10) || 0);
+        if (!lblRowCount) return;
+        lblRowCount.textContent = num === 1 ? '1 registro' : num + ' registros';
+    }
 
     const escapeHtml = (s) => String(s || '')
         .replace(/&/g, '&amp;')
@@ -294,6 +304,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         const cia = this.value.trim();
         cardResultado.classList.add('d-none');
         tbody.innerHTML = '';
+        setRowCount(0);
         lastResumenAsistenciaExport = null;
         btnExportExcel.disabled = true;
         if (!cia) {
@@ -334,6 +345,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
             if (!res.ok) {
                 cardResultado.classList.add('d-none');
+                setRowCount(0);
                 lastResumenAsistenciaExport = null;
                 btnExportExcel.disabled = true;
                 alert(data.error || 'Error al consultar el reporte.');
@@ -341,6 +353,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             }
             if (!Array.isArray(data)) {
                 cardResultado.classList.add('d-none');
+                setRowCount(0);
                 lastResumenAsistenciaExport = null;
                 btnExportExcel.disabled = true;
                 alert('Respuesta inválida del servidor.');
@@ -349,6 +362,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             if (data.length === 0) {
                 tbody.innerHTML = '';
                 cardResultado.classList.add('d-none');
+                setRowCount(0);
                 lastResumenAsistenciaExport = null;
                 btnExportExcel.disabled = true;
                 alert('No se encontraron registros para los filtros seleccionados.');
@@ -356,6 +370,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             }
 
             renderRows(data);
+            setRowCount(data.length);
             cardResultado.classList.remove('d-none');
             lastResumenAsistenciaExport = {
                 data,
@@ -370,6 +385,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         } catch (err) {
             console.error(err);
             cardResultado.classList.add('d-none');
+            setRowCount(0);
             lastResumenAsistenciaExport = null;
             btnExportExcel.disabled = true;
             alert('Error de red o del servidor.');
