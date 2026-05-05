@@ -99,11 +99,31 @@ document.addEventListener('DOMContentLoaded', async function () {
     const cardResultado = document.getElementById('cardResultado');
     const lblRowCount = document.getElementById('lblRowCount');
     let lastResumenAsistenciaExport = null;
+    const STORAGE_KEY = 'asistencia.reporte_resumen.state.v1';
 
     function setRowCount(n) {
         const num = Math.max(0, parseInt(n, 10) || 0);
         if (!lblRowCount) return;
         lblRowCount.textContent = num === 1 ? '1 registro' : num + ' registros';
+    }
+
+    function saveState(state) {
+        try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state || {}));
+        } catch (e) {
+            console.warn('No se pudo persistir estado del reporte.', e);
+        }
+    }
+
+    function loadState() {
+        try {
+            const raw = window.localStorage.getItem(STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (e) {
+            return null;
+        }
     }
 
     const escapeHtml = (s) => String(s || '')
@@ -189,6 +209,13 @@ document.addEventListener('DOMContentLoaded', async function () {
     function selectedText(selectEl) {
         const opt = selectEl && selectEl.options ? selectEl.options[selectEl.selectedIndex] : null;
         return opt ? String(opt.textContent || '').trim() : '';
+    }
+
+    function optionExists(selectEl, value) {
+        if (!selectEl) return false;
+        return Array.prototype.some.call(selectEl.options || [], function (opt) {
+            return String(opt.value) === String(value);
+        });
     }
 
     async function exportResumenAsistenciaExcel(data, meta) {
@@ -300,6 +327,36 @@ document.addEventListener('DOMContentLoaded', async function () {
     setDefaultDates();
     await poblarSelect('/api/selectores/companias', cboCompania, false);
 
+    const saved = loadState();
+    if (saved && saved.filters) {
+        if (saved.filters.cia && optionExists(cboCompania, saved.filters.cia)) {
+            cboCompania.value = String(saved.filters.cia);
+            await poblarSelect(`/api/selectores/trabajadores?cia=${encodeURIComponent(cboCompania.value)}`, cboTrabajador, true);
+            if (saved.filters.person && optionExists(cboTrabajador, saved.filters.person)) {
+                cboTrabajador.value = String(saved.filters.person);
+            } else {
+                cboTrabajador.value = '0';
+            }
+        }
+        if (saved.filters.fechaini) txtFechaIni.value = String(saved.filters.fechaini);
+        if (saved.filters.fechafin) txtFechaFin.value = String(saved.filters.fechafin);
+        if (Array.isArray(saved.data) && saved.data.length > 0) {
+            renderRows(saved.data);
+            setRowCount(saved.data.length);
+            cardResultado.classList.remove('d-none');
+            lastResumenAsistenciaExport = {
+                data: saved.data,
+                meta: saved.meta || {
+                    compania: selectedText(cboCompania),
+                    trabajador: selectedText(cboTrabajador) || 'Todos',
+                    fechaini: txtFechaIni.value,
+                    fechafin: txtFechaFin.value
+                }
+            };
+            btnExportExcel.disabled = false;
+        }
+    }
+
     cboCompania.addEventListener('change', async function () {
         const cia = this.value.trim();
         cardResultado.classList.add('d-none');
@@ -382,6 +439,11 @@ document.addEventListener('DOMContentLoaded', async function () {
                 }
             };
             btnExportExcel.disabled = false;
+            saveState({
+                filters: { cia, person, fechaini, fechafin },
+                data: data,
+                meta: lastResumenAsistenciaExport.meta
+            });
         } catch (err) {
             console.error(err);
             cardResultado.classList.add('d-none');

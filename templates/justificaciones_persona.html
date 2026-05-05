@@ -1,0 +1,346 @@
+{% extends "layout.html" %}
+{% block title %}Justificaciones por Persona{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="fw-bold mb-0" style="color: #1e293b;"><i class="bi bi-file-earmark-medical me-2"></i>Justificaciones por Persona</h4>
+        <button class="btn btn-primary btn-sm px-4 shadow-sm" id="btnNuevaJustificacion" type="button">
+            <i class="bi bi-plus-lg me-1"></i> Nueva Justificación
+        </button>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
+        <div class="card-body bg-light p-3">
+            <form id="frmFiltrosJust" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold text-muted mb-1" for="ciaFilter">Compañía</label>
+                    <select id="ciaFilter" class="form-select form-select-sm shadow-none border-secondary" required>
+                        {% for c in companies %}
+                        <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
+                        {% else %}
+                        <option value="">Sin compañías</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold text-muted mb-1" for="personFilter"><i class="bi bi-person-bounding-box me-1"></i> Filtrar por Trabajador</label>
+                    <select id="personFilter" class="form-select form-select-sm shadow-none border-secondary" disabled>
+                        <option value="0">TODOS LOS TRABAJADORES</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <div class="d-flex align-items-center gap-2 justify-content-end">
+                        <button type="submit" class="btn btn-primary btn-sm px-4">
+                            <i class="bi bi-search"></i> Consultar
+                        </button>
+                        <span class="small text-muted fw-bold" id="lblCount">0 registros</span>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="table-responsive" style="max-height: 70vh;">
+            <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th>DNI</th>
+                        <th>Nombre del Trabajador</th>
+                        <th>Tipo</th>
+                        <th>Desde</th>
+                        <th>Hasta</th>
+                        <th>Comentario</th>
+                        <th class="text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="tablaJustificaciones"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalJustificacion" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <form id="formJustificacion" class="modal-content border-0 shadow" enctype="multipart/form-data">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title" id="modalTitle">Registro de Justificación</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" name="id" id="fieldId">
+                <input type="hidden" name="company" id="fieldCia">
+
+                <div class="row g-3">
+                    <div class="col-md-12">
+                        <label class="small fw-bold mb-1" for="fieldPerson">Trabajador</label>
+                        <select name="person" id="fieldPerson" class="form-select form-select-sm border-secondary shadow-none" required></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="small fw-bold mb-1" for="fieldTipo">Tipo de Justificación</label>
+                        <select name="idjustificacion" id="fieldTipo" class="form-select form-select-sm border-secondary shadow-none" required></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="small fw-bold mb-1" for="fieldFini">Fecha Inicio</label>
+                        <input type="date" name="fechainicio" id="fieldFini" class="form-control form-control-sm border-secondary shadow-none" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="small fw-bold mb-1" for="fieldFfin">Fecha Fin</label>
+                        <input type="date" name="fechafin" id="fieldFfin" class="form-control form-control-sm border-secondary shadow-none" required>
+                    </div>
+                    <div class="col-md-12">
+                        <label class="small fw-bold mb-1">Documento Sustento (Opcional)</label>
+                        <input type="file" name="sustento" class="form-control form-control-sm border-secondary shadow-none">
+                    </div>
+                    <div class="col-md-12">
+                        <label class="small fw-bold mb-1" for="fieldComentario">Comentario</label>
+                        <textarea name="comentario" id="fieldComentario" class="form-control form-control-sm border-secondary shadow-none" rows="2"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-success btn-sm px-4" id="btnGuardar"><i class="bi bi-save"></i> Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const modal = new bootstrap.Modal(document.getElementById('modalJustificacion'));
+    const state = { rows: [], tipos: [], trabajadores: [] };
+
+    function $(id) { return document.getElementById(id); }
+    function txt(v) { return v == null ? '' : String(v); }
+    function esc(s) {
+        return txt(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function dateOnly(v) {
+        const s = txt(v).trim();
+        if (!s) return '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+        const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (m) return m[3] + '-' + m[2] + '-' + m[1];
+        return s.slice(0, 10);
+    }
+    function dateUi(v) {
+        const iso = dateOnly(v);
+        if (!iso) return '';
+        const d = new Date(iso + 'T00:00:00');
+        return isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-PE');
+    }
+    function pick(o, names) {
+        if (!o) return '';
+        const keys = Object.keys(o);
+        for (let i = 0; i < names.length; i++) {
+            const n = names[i];
+            if (Object.prototype.hasOwnProperty.call(o, n) && o[n] != null) return o[n];
+            const k = keys.find((x) => x.toLowerCase() === n.toLowerCase());
+            if (k && o[k] != null) return o[k];
+        }
+        return '';
+    }
+    function setCount(n) {
+        const num = Math.max(0, parseInt(n, 10) || 0);
+        $('lblCount').innerText = num === 1 ? '1 registro' : num + ' registros';
+    }
+
+    async function cargarTipos() {
+        const res = await fetch('/api/justificaciones_persona/tipos');
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'No se pudieron cargar tipos.');
+        state.tipos = Array.isArray(json.data) ? json.data : [];
+        const sel = $('fieldTipo');
+        sel.innerHTML = '<option value="">Seleccione...</option>';
+        state.tipos.forEach((t) => {
+            const id = pick(t, ['IdJustificacion', 'idjustificacion', 'id']);
+            const ab = pick(t, ['Abreviatura', 'abreviatura']);
+            const desc = pick(t, ['Descripcion', 'description', 'descripcion']);
+            const opt = document.createElement('option');
+            opt.value = txt(id);
+            opt.textContent = (txt(ab) ? txt(ab) + ' - ' : '') + txt(desc);
+            sel.appendChild(opt);
+        });
+    }
+
+    async function cargarTrabajadores(cia) {
+        const res = await fetch('/api/selectores/trabajadores?cia=' + encodeURIComponent(cia));
+        const data = await res.json();
+        state.trabajadores = Array.isArray(data) ? data : [];
+        const sel = $('fieldPerson');
+        const selFiltro = $('personFilter');
+        sel.innerHTML = '<option value="">Seleccione...</option>';
+        if (selFiltro) {
+            selFiltro.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+            selFiltro.disabled = true;
+        }
+        state.trabajadores.forEach((t) => {
+            const opt = document.createElement('option');
+            opt.value = txt(t.id);
+            opt.textContent = txt(t.text);
+            sel.appendChild(opt);
+            if (selFiltro) {
+                const optF = document.createElement('option');
+                optF.value = txt(t.id);
+                optF.textContent = txt(t.text);
+                selFiltro.appendChild(optF);
+            }
+        });
+        if (selFiltro) selFiltro.disabled = false;
+    }
+
+    async function cargarLista() {
+        const cia = txt($('ciaFilter').value).trim();
+        const person = txt(($('personFilter') || {}).value || '0').trim() || '0';
+        if (!cia) {
+            $('tablaJustificaciones').innerHTML = '';
+            setCount(0);
+            return;
+        }
+        const res = await fetch(
+            '/api/justificaciones_persona/listar?cia=' + encodeURIComponent(cia) + '&person=' + encodeURIComponent(person)
+        );
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+            alert(json.error || 'No se pudo cargar la lista.');
+            return;
+        }
+        state.rows = Array.isArray(json.data) ? json.data : [];
+        const body = $('tablaJustificaciones');
+        body.innerHTML = state.rows.map((j, idx) => {
+            const id = pick(j, ['Id', 'ID', 'id']);
+            const dni = pick(j, ['DNI', 'dni']);
+            const nombre = pick(j, ['Name', 'Nombre', 'name']);
+            const abrev = pick(j, ['Abreviatura', 'abreviatura']);
+            const fi = pick(j, ['FechaInicio', 'fechainicio']);
+            const ff = pick(j, ['FechaFin', 'fechafin']);
+            const comentario = pick(j, ['Comentario', 'comentario']);
+            const safeId = esc(id);
+            return '<tr>'
+                + '<td>' + esc(dni) + '</td>'
+                + '<td class="fw-bold">' + esc(nombre) + '</td>'
+                + '<td><span class="badge bg-info text-dark">' + esc(abrev) + '</span></td>'
+                + '<td>' + esc(dateUi(fi)) + '</td>'
+                + '<td>' + esc(dateUi(ff)) + '</td>'
+                + '<td class="small text-muted">' + esc(comentario) + '</td>'
+                + '<td class="text-center">'
+                + '<button class="btn btn-link btn-sm text-primary p-0 me-2" type="button" data-edit="' + idx + '" title="Editar"><i class="bi bi-pencil-square"></i></button>'
+                + '<button class="btn btn-link btn-sm text-danger p-0" type="button" data-delete="' + safeId + '" title="Eliminar"><i class="bi bi-trash"></i></button>'
+                + '</td>'
+                + '</tr>';
+        }).join('');
+        setCount(state.rows.length);
+    }
+
+    function nuevoRegistro() {
+        $('modalTitle').innerText = 'Registro de Justificación';
+        $('fieldId').value = '';
+        $('fieldCia').value = txt($('ciaFilter').value).trim();
+        $('fieldPerson').value = '';
+        $('fieldTipo').value = '';
+        $('fieldFini').value = '';
+        $('fieldFfin').value = '';
+        $('fieldComentario').value = '';
+        modal.show();
+    }
+
+    function editarRegistro(index) {
+        const j = state.rows[index];
+        if (!j) return;
+        $('modalTitle').innerText = 'Editar Justificación';
+        $('fieldId').value = txt(pick(j, ['Id', 'ID', 'id']));
+        $('fieldCia').value = txt($('ciaFilter').value).trim();
+        $('fieldPerson').value = txt(pick(j, ['Person', 'person']));
+        $('fieldTipo').value = txt(pick(j, ['IdJustificacion', 'idjustificacion']));
+        $('fieldFini').value = dateOnly(pick(j, ['FechaInicio', 'fechainicio']));
+        $('fieldFfin').value = dateOnly(pick(j, ['FechaFin', 'fechafin']));
+        $('fieldComentario').value = txt(pick(j, ['Comentario', 'comentario']));
+        modal.show();
+    }
+
+    async function eliminarRegistro(id) {
+        if (!id) return;
+        if (!confirm('¿Eliminar esta justificación?')) return;
+        const res = await fetch('/api/justificaciones_persona/eliminar/' + encodeURIComponent(id), { method: 'DELETE' });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) {
+            alert(json.error || 'No se pudo eliminar.');
+            return;
+        }
+        await cargarLista();
+    }
+
+    async function guardar(ev) {
+        ev.preventDefault();
+        const fd = new FormData($('formJustificacion'));
+        fd.set('company', txt($('ciaFilter').value).trim());
+        const fi = txt(fd.get('fechainicio')).trim();
+        const ff = txt(fd.get('fechafin')).trim();
+        if (!fi || !ff) {
+            alert('Indique fecha inicio y fecha fin.');
+            return;
+        }
+        if (ff < fi) {
+            alert('La fecha fin no puede ser menor que la fecha inicio.');
+            return;
+        }
+        const btn = $('btnGuardar');
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/justificaciones_persona/guardar', {
+                method: 'POST',
+                body: fd
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) {
+                alert(json.error || 'No se pudo guardar.');
+                return;
+            }
+            modal.hide();
+            await cargarLista();
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    $('btnNuevaJustificacion').addEventListener('click', nuevoRegistro);
+    $('ciaFilter').addEventListener('change', async function () {
+        const cia = txt(this.value).trim();
+        await cargarTrabajadores(cia);
+    });
+    $('frmFiltrosJust').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        await cargarLista();
+    });
+    $('formJustificacion').addEventListener('submit', guardar);
+    $('tablaJustificaciones').addEventListener('click', function (e) {
+        const btnEdit = e.target.closest('button[data-edit]');
+        if (btnEdit) {
+            editarRegistro(Number(btnEdit.getAttribute('data-edit')));
+            return;
+        }
+        const btnDelete = e.target.closest('button[data-delete]');
+        if (btnDelete) {
+            eliminarRegistro(btnDelete.getAttribute('data-delete'));
+        }
+    });
+
+    (async function init() {
+        try {
+            await cargarTipos();
+            await cargarTrabajadores(txt($('ciaFilter').value).trim());
+            await cargarLista();
+        } catch (e) {
+            console.error(e);
+            alert('No se pudo inicializar la vista de justificaciones por persona.');
+        }
+    })();
+})();
+</script>
+{% endblock %}

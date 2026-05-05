@@ -1,0 +1,253 @@
+{% extends "layout.html" %}
+{% block title %}Procesar Asistencia{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <h4 class="fw-bold mb-3" style="color: #1e293b;"><i class="bi bi-cpu me-2"></i>Procesar Asistencia</h4>
+
+    <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
+        <div class="card-body bg-light p-3">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="small fw-bold text-muted mb-1" for="companySelector">Compañía</label>
+                    <select id="companySelector" class="form-select form-select-sm shadow-none border-secondary">
+                        {% for c in companies %}
+                        <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
+                        {% else %}
+                        <option value="">Sin compañías</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="small fw-bold text-muted mb-1" for="fechaIni">Fecha Inicio</label>
+                    <input type="date" id="fechaIni" class="form-control form-control-sm shadow-none border-secondary">
+                </div>
+                <div class="col-md-2">
+                    <label class="small fw-bold text-muted mb-1" for="fechaFin">Fecha Fin</label>
+                    <input type="date" id="fechaFin" class="form-control form-control-sm shadow-none border-secondary">
+                </div>
+                <div class="col-md-4 text-end">
+                    <button class="btn btn-primary btn-sm px-4 shadow-sm" id="btnBuscarPersonas" type="button">
+                        <i class="bi bi-search me-1"></i> Buscar Personal
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="progresoContainer" class="mb-3 d-none">
+        <div class="d-flex justify-content-between mb-1">
+            <span class="small fw-bold text-primary" id="progresoTexto">Procesando: 0 de 0</span>
+            <span class="small fw-bold text-primary" id="progresoPorcentaje">0%</span>
+        </div>
+        <div class="progress" style="height: 10px;">
+            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%"></div>
+        </div>
+        <div class="small text-muted mt-1" id="progresoDetalle"></div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 55vh; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0" id="tablaPersonas" style="font-size: 0.82rem;">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th class="ps-3" style="width: 40px;">
+                                <input type="checkbox" class="form-check-input shadow-none" id="checkAll">
+                            </th>
+                            <th style="width: 120px;">Código</th>
+                            <th>Nombre del Trabajador</th>
+                            <th>Última Fecha Proc.</th>
+                        </tr>
+                    </thead>
+                    <tbody id="listaPersonasBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer bg-white d-flex justify-content-between align-items-center py-2">
+            <span class="small text-muted" id="totalTrabajadores">0 trabajadores</span>
+            <button id="btnProcesar" class="btn btn-success btn-sm px-4 d-none" type="button">
+                <i class="bi bi-gear-wide-connected me-1"></i> Iniciar Proceso
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const $ = (id) => document.getElementById(id);
+    const body = $('listaPersonasBody');
+    const checkAll = $('checkAll');
+    const btnProcesar = $('btnProcesar');
+    const btnBuscar = $('btnBuscarPersonas');
+
+    function setDefaultDates() {
+        const hoy = new Date();
+        const firstDay = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        $('fechaIni').value = firstDay.toISOString().slice(0, 10);
+        $('fechaFin').value = hoy.toISOString().slice(0, 10);
+    }
+
+    function resetProgress() {
+        $('progresoContainer').classList.add('d-none');
+        $('progressBar').style.width = '0%';
+        $('progresoTexto').innerText = 'Procesando: 0 de 0';
+        $('progresoPorcentaje').innerText = '0%';
+        $('progresoDetalle').innerText = '';
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function getSelectedPersons() {
+        return Array.from(document.querySelectorAll('.chk-persona:checked')).map((c) => c.value);
+    }
+
+    function refreshSelectionState() {
+        const checks = Array.from(document.querySelectorAll('.chk-persona'));
+        const selected = checks.filter((c) => c.checked).length;
+        checkAll.checked = checks.length > 0 && selected === checks.length;
+        checkAll.indeterminate = selected > 0 && selected < checks.length;
+    }
+
+    async function cargarPersonas(keepProgress) {
+        const cia = ($('companySelector').value || '').trim();
+        if (!cia) {
+            alert('Seleccione una compañía.');
+            return;
+        }
+        btnBuscar.disabled = true;
+        btnProcesar.classList.add('d-none');
+        body.innerHTML = '';
+        $('totalTrabajadores').innerText = '0 trabajadores';
+        if (!keepProgress) {
+            resetProgress();
+        }
+        try {
+            const res = await fetch('/api/asistencia/personas?cia=' + encodeURIComponent(cia));
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+                alert(json.error || 'No se pudo cargar el personal.');
+                return;
+            }
+            const data = Array.isArray(json.data) ? json.data : [];
+            data.forEach((p) => {
+                const person = p.Person == null ? '' : String(p.Person);
+                const name = p.Name == null ? '' : String(p.Name);
+                const ultima = p.ultimafecha == null ? '' : String(p.ultimafecha);
+                const tr = document.createElement('tr');
+                tr.innerHTML = ''
+                    + '<td class="ps-3"><input type="checkbox" class="form-check-input chk-persona" value="' + escapeHtml(person) + '"></td>'
+                    + '<td>' + escapeHtml(person) + '</td>'
+                    + '<td class="fw-bold">' + escapeHtml(name) + '</td>'
+                    + '<td class="text-muted small">' + escapeHtml(ultima || 'Nunca') + '</td>';
+                body.appendChild(tr);
+            });
+            $('totalTrabajadores').innerText = data.length === 1 ? '1 trabajador' : data.length + ' trabajadores';
+            checkAll.checked = false;
+            checkAll.indeterminate = false;
+            btnProcesar.classList.toggle('d-none', data.length === 0);
+        } catch (e) {
+            console.error(e);
+            alert('Error de red al cargar personal.');
+        } finally {
+            btnBuscar.disabled = false;
+        }
+    }
+
+    async function iniciarProcesamiento() {
+        const cia = ($('companySelector').value || '').trim();
+        const fechaIni = ($('fechaIni').value || '').trim();
+        const fechaFin = ($('fechaFin').value || '').trim();
+        const seleccionados = getSelectedPersons();
+
+        if (!fechaIni || !fechaFin) {
+            alert('Seleccione fecha inicio y fin.');
+            return;
+        }
+        if (fechaFin <= fechaIni) {
+            alert('La fecha fin debe ser mayor que la fecha inicio.');
+            return;
+        }
+        if (seleccionados.length === 0) {
+            alert('Seleccione al menos un trabajador.');
+            return;
+        }
+
+        $('progresoContainer').classList.remove('d-none');
+        btnProcesar.disabled = true;
+        btnBuscar.disabled = true;
+        $('companySelector').disabled = true;
+        $('fechaIni').disabled = true;
+        $('fechaFin').disabled = true;
+
+        const total = seleccionados.length;
+        let procesados = 0;
+        let errores = 0;
+
+        for (const person of seleccionados) {
+            try {
+                const res = await fetch('/api/asistencia/procesar_individual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cia, person, fechaIni, fechaFin }),
+                });
+                const json = await res.json().catch(() => ({}));
+                if (!res.ok || !json.success) {
+                    errores += 1;
+                }
+            } catch (e) {
+                console.error(e);
+                errores += 1;
+            }
+
+            procesados += 1;
+            const pct = Math.round((procesados / total) * 100);
+            $('progressBar').style.width = pct + '%';
+            $('progresoTexto').innerText = 'Procesando: ' + procesados + ' de ' + total;
+            $('progresoPorcentaje').innerText = pct + '%';
+            $('progresoDetalle').innerText = errores > 0
+                ? ('Con errores: ' + errores)
+                : 'Sin errores.';
+        }
+
+        btnProcesar.disabled = false;
+        btnBuscar.disabled = false;
+        $('companySelector').disabled = false;
+        $('fechaIni').disabled = false;
+        $('fechaFin').disabled = false;
+        $('progresoDetalle').innerText = errores > 0
+            ? ('Completado. Errores: ' + errores + '. Refrescando lista...')
+            : 'Completado. Refrescando lista...';
+        await cargarPersonas(true);
+        refreshSelectionState();
+    }
+
+    checkAll.addEventListener('change', function () {
+        document.querySelectorAll('.chk-persona').forEach((chk) => { chk.checked = checkAll.checked; });
+        refreshSelectionState();
+    });
+
+    body.addEventListener('change', function (e) {
+        if (e.target && e.target.classList.contains('chk-persona')) {
+            refreshSelectionState();
+        }
+    });
+
+    btnBuscar.addEventListener('click', cargarPersonas);
+    btnProcesar.addEventListener('click', iniciarProcesamiento);
+
+    setDefaultDates();
+    if (($('companySelector').value || '').trim()) {
+        cargarPersonas();
+    }
+})();
+</script>
+{% endblock %}
