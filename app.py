@@ -314,6 +314,164 @@ def justificaciones_persona():
     )
 
 
+@app.route('/asignacion_horarios')
+@login_required
+def asignacion_horarios():
+    ensure_user_session()
+    raw = get_companias_selector()
+    companies = [{"id": str(c.get("id", "")), "name": c.get("text", "")} for c in raw if c.get("id") is not None]
+    ids = [c["id"] for c in companies]
+    if "BGT" in ids:
+        default_company = "BGT"
+    else:
+        default_company = str(session.get("company") or "").strip()
+        if companies and default_company:
+            if default_company not in set(ids):
+                default_company = companies[0]["id"]
+        elif companies:
+            default_company = companies[0]["id"]
+        else:
+            default_company = ""
+    return render_template(
+        'asignacion_horarios.html',
+        companies=companies,
+        default_company=default_company,
+    )
+
+
+@app.route('/api/horarios/listar')
+@login_required
+def api_listar_horarios_selector():
+    cia = (request.args.get('cia') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    try:
+        rows = get_horarios_resumen_por_compania(cia)
+        data = [
+            {
+                "IdHorario": _jsonable_value(r.get("IdHorario")),
+                "Descripcion": _jsonable_value(r.get("NombreHorario")),
+            }
+            for r in (rows or [])
+        ]
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        logging.exception("api_listar_horarios_selector")
+        return jsonify({"success": False, "error": str(e), "data": []}), 500
+
+
+@app.route('/api/asignaciones/listar')
+@login_required
+def api_listar_asignaciones():
+    cia = (request.args.get('cia') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("EXEC [dbo].[sp_pr_horariosasignados_web] @cia=?", (cia,))
+        data = []
+        for row in cursor.fetchall():
+            data.append(
+                {
+                    "IdAsignacion": _jsonable_value(getattr(row, 'IdAsignacion', None)),
+                    "Person": _jsonable_value(getattr(row, 'person', None)),
+                    "Name": _jsonable_value(getattr(row, 'name', None)),
+                    "Horario": _jsonable_value(getattr(row, 'NombreHorario', None)),
+                    "FechaInicio": _jsonable_value(getattr(row, 'fechinicio', None)),
+                    "FechaFin": _jsonable_value(getattr(row, 'fechafin', None)),
+                }
+            )
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        logging.exception("api_listar_asignaciones")
+        return jsonify({"success": False, "error": str(e), "data": []}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/asignaciones/guardar', methods=['POST'])
+@login_required
+def api_guardar_asignacion():
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    idhorario = body.get('idhorario')
+    fecha_ini = (body.get('fecha_ini') or '').strip()
+    fecha_fin = (body.get('fecha_fin') or '').strip()
+    personas = body.get('personas') if isinstance(body.get('personas'), list) else []
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not idhorario:
+        return jsonify({"success": False, "error": "Seleccione un horario."}), 400
+    if not fecha_ini:
+        return jsonify({"success": False, "error": "Indique fecha de inicio."}), 400
+    if fecha_fin and fecha_fin < fecha_ini:
+        return jsonify({"success": False, "error": "La fecha fin no puede ser menor que la fecha inicio."}), 400
+    personas = [str(p).strip() for p in personas if str(p or '').strip()]
+    if not personas:
+        return jsonify({"success": False, "error": "Seleccione al menos un trabajador."}), 400
+
+    usuario = str(
+        getattr(current_user, 'username', '')
+        or getattr(current_user, 'id', '')
+        or ''
+    )[:20]
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        for person in personas:
+            cursor.execute(
+                """
+                INSERT INTO AsignacionHorarios (
+                    Person, Company, IdHorario, FechaInicio, FechaFin,
+                    FechaRegistro, XLastUser, XLastDate
+                )
+                VALUES (?, ?, ?, ?, ?, GETDATE(), ?, GETDATE())
+                """,
+                (person, cia, idhorario, fecha_ini, (fecha_fin or None), usuario),
+            )
+        conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        logging.exception("api_guardar_asignacion")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/asignaciones/eliminar/<int:id_asignacion>', methods=['DELETE'])
+@login_required
+def api_eliminar_asignacion(id_asignacion):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM AsignacionHorarios WHERE IdAsignacion = ?", (id_asignacion,))
+        conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        logging.exception("api_eliminar_asignacion")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 @app.route('/api/justificaciones_persona/listar')
 @login_required
 def api_listar_justificaciones_persona():
@@ -610,22 +768,68 @@ def api_personas_asistencia():
         data = []
         for row in cursor.fetchall():
             ultima = getattr(row, 'ultimafecha', None)
+            entry = getattr(row, 'EntryDate', None)
+            cease = getattr(row, 'CeaseDate', None)
             if isinstance(ultima, datetime):
                 ultima_fmt = ultima.strftime('%d/%m/%Y %H:%M')
             elif isinstance(ultima, date):
                 ultima_fmt = ultima.strftime('%d/%m/%Y 00:00')
             else:
                 ultima_fmt = _jsonable_value(ultima)
+            if isinstance(entry, datetime):
+                entry_fmt = entry.strftime('%d/%m/%Y')
+            elif isinstance(entry, date):
+                entry_fmt = entry.strftime('%d/%m/%Y')
+            else:
+                entry_fmt = _jsonable_value(entry)
+            if isinstance(cease, datetime):
+                cease_fmt = cease.strftime('%d/%m/%Y')
+            elif isinstance(cease, date):
+                cease_fmt = cease.strftime('%d/%m/%Y')
+            else:
+                cease_fmt = _jsonable_value(cease)
             data.append(
                 {
                     "Person": _jsonable_value(getattr(row, 'Person', None)),
                     "Name": _jsonable_value(getattr(row, 'Name', None)),
+                    "EntryDate": entry_fmt,
+                    "CeaseDate": cease_fmt,
                     "ultimafecha": ultima_fmt,
                 }
             )
         return jsonify({"success": True, "data": data})
     except Exception as e:
         logging.exception("api_personas_asistencia")
+        return jsonify({"success": False, "error": str(e), "data": []}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/asistencia/selector_personas')
+@login_required
+def api_selector_personas():
+    cia = (request.args.get('cia') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("EXEC [dbo].[sp_pr_selectorpersonas_web] @cia = ?", (cia,))
+        data = []
+        for row in cursor.fetchall():
+            data.append({
+                "Person": _jsonable_value(getattr(row, 'Person', None)),
+                "Name": _jsonable_value(getattr(row, 'Name', None)),
+            })
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        logging.exception("api_selector_personas")
         return jsonify({"success": False, "error": str(e), "data": []}), 500
     finally:
         if conn:

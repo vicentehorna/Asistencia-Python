@@ -1,0 +1,259 @@
+{% extends "layout.html" %}
+{% block title %}Asignación Masiva de Horarios{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <h4 class="fw-bold text-secondary mb-3"><i class="bi bi-person-badge-fill me-2"></i>Asignación Masiva de Horarios</h4>
+
+    <div class="row g-3">
+        <div class="col-md-5">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-light py-2">
+                    <label class="small fw-bold text-muted mb-1" for="ciaSelector">1. Seleccionar Compañía</label>
+                    <select id="ciaSelector" class="form-select form-select-sm border-secondary shadow-none mb-2">
+                        {% for c in companies %}
+                        <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
+                        {% else %}
+                        <option value="">Sin compañías</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="height: 450px;">
+                        <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                            <thead class="bg-white sticky-top">
+                                <tr>
+                                    <th class="ps-3" style="width: 40px;">
+                                        <input type="checkbox" class="form-check-input" id="checkAll">
+                                    </th>
+                                    <th>Código</th>
+                                    <th>Nombre del Trabajador</th>
+                                </tr>
+                            </thead>
+                            <tbody id="listaPersonasBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer bg-white py-2">
+                    <span class="small text-muted" id="countSelected">0 seleccionados</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-7">
+            <div class="card shadow-sm border-0 mb-3 border-start border-4 border-success">
+                <div class="card-body py-3">
+                    <h6 class="fw-bold mb-3 text-success">2. Definir Horario y Rango</h6>
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="small fw-bold mb-1" for="horarioSelector">Horario de Trabajo</label>
+                            <select id="horarioSelector" class="form-select border-secondary shadow-none"></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="small fw-bold mb-1" for="fechaIni">Fecha Inicio</label>
+                            <input type="date" id="fechaIni" class="form-control border-secondary shadow-none">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="small fw-bold mb-1" for="fechaFin">Fecha Fin</label>
+                            <input type="date" id="fechaFin" class="form-control border-secondary shadow-none">
+                        </div>
+                        <div class="col-md-12 mt-4 text-end">
+                            <button class="btn btn-success px-5 shadow" id="btnAsignarMasivo" type="button">
+                                <i class="bi bi-check-circle-fill me-2"></i> Procesar Asignación Masiva
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white py-2 fw-bold small text-muted">Últimas Asignaciones Realizadas</div>
+                <div class="table-responsive" style="max-height: 250px;">
+                    <table class="table table-sm table-hover mb-0" style="font-size: 0.8rem;">
+                        <thead class="bg-light">
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Horario</th>
+                                <th>Periodo</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaAsignacionesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const $ = (id) => document.getElementById(id);
+    let historial = [];
+
+    function txt(v) { return v == null ? '' : String(v); }
+    function esc(s) {
+        return txt(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function fechaUi(v) {
+        const s = txt(v).trim();
+        if (!s) return '';
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toLocaleDateString('es-PE');
+        return s.slice(0, 10);
+    }
+
+    function actualizarContador() {
+        const n = document.querySelectorAll('.chk-persona:checked').length;
+        $('countSelected').innerText = n + ' seleccionados';
+    }
+
+    function toggleAll(source) {
+        document.querySelectorAll('.chk-persona').forEach((chk) => {
+            chk.checked = source.checked;
+        });
+        actualizarContador();
+    }
+
+    function renderHistorial() {
+        const body = $('tablaAsignacionesBody');
+        body.innerHTML = historial.map((a) => {
+            const periodo = fechaUi(a.FechaInicio) + ' - ' + (a.FechaFin ? fechaUi(a.FechaFin) : '-');
+            const idAsignacion = txt(a.IdAsignacion).trim();
+            return '<tr>'
+                + '<td class="fw-bold">' + esc(a.Name) + '</td>'
+                + '<td><span class="badge bg-light text-dark border">' + esc(a.Horario) + '</span></td>'
+                + '<td>' + esc(periodo) + '</td>'
+                + '<td>'
+                + '<button class="btn btn-link btn-sm text-danger p-0" type="button" data-del="' + esc(idAsignacion) + '" title="Eliminar">'
+                + '<i class="bi bi-trash"></i></button>'
+                + '</td>'
+                + '</tr>';
+        }).join('');
+    }
+
+    async function cargarHorarios() {
+        const cia = txt($('ciaSelector').value).trim();
+        const res = await fetch('/api/horarios/listar?cia=' + encodeURIComponent(cia));
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'No se pudieron cargar horarios.');
+        const data = Array.isArray(json.data) ? json.data : [];
+        $('horarioSelector').innerHTML = data.map((h) =>
+            '<option value="' + esc(h.IdHorario) + '">' + esc(h.Descripcion) + '</option>'
+        ).join('');
+    }
+
+    async function cargarHistorial() {
+        const cia = txt($('ciaSelector').value).trim();
+        const res = await fetch('/api/asignaciones/listar?cia=' + encodeURIComponent(cia));
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'No se pudo cargar historial.');
+        historial = Array.isArray(json.data) ? json.data : [];
+        renderHistorial();
+    }
+
+    async function cargarPersonal() {
+        const cia = txt($('ciaSelector').value).trim();
+        const res = await fetch('/api/asistencia/selector_personas?cia=' + encodeURIComponent(cia));
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.error || 'No se pudo cargar personal.');
+        const data = Array.isArray(json.data) ? json.data : [];
+        $('listaPersonasBody').innerHTML = data.map((p) =>
+            '<tr class="persona-row">'
+            + '<td class="ps-3"><input type="checkbox" class="form-check-input chk-persona" value="' + esc(p.Person) + '"></td>'
+            + '<td class="text-muted">' + esc(p.Person) + '</td>'
+            + '<td class="fw-bold">' + esc(p.Name) + '</td>'
+            + '</tr>'
+        ).join('');
+        $('checkAll').checked = false;
+        actualizarContador();
+        await cargarHistorial();
+    }
+
+    async function guardarAsignacionMasiva() {
+        const seleccionados = Array.from(document.querySelectorAll('.chk-persona:checked')).map((c) => c.value);
+        const payload = {
+            personas: seleccionados,
+            cia: $('ciaSelector').value,
+            idhorario: $('horarioSelector').value,
+            fecha_ini: $('fechaIni').value,
+            fecha_fin: $('fechaFin').value
+        };
+
+        if (!payload.cia || !payload.idhorario || !payload.fecha_ini || seleccionados.length === 0) {
+            alert('Por favor complete todos los campos obligatorios y seleccione al menos un trabajador.');
+            return;
+        }
+        if (payload.fecha_fin && payload.fecha_fin < payload.fecha_ini) {
+            alert('La fecha fin no puede ser menor que la fecha inicio.');
+            return;
+        }
+
+        const btn = $('btnAsignarMasivo');
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/asignaciones/guardar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) {
+                alert(json.error || 'No se pudo procesar la asignación masiva.');
+                return;
+            }
+            await cargarHistorial();
+            alert('Proceso completado exitosamente.');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function eliminarAsignacion(idAsignacion) {
+        if (!idAsignacion) return;
+        if (!confirm('¿Eliminar esta asignación?')) return;
+        const res = await fetch('/api/asignaciones/eliminar/' + encodeURIComponent(idAsignacion), { method: 'DELETE' });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) {
+            alert(json.error || 'No se pudo eliminar.');
+            return;
+        }
+        await cargarHistorial();
+    }
+
+    $('ciaSelector').addEventListener('change', async function () {
+        try {
+            await cargarHorarios();
+            await cargarPersonal();
+        } catch (e) {
+            console.error(e);
+            alert('No se pudieron cargar los datos de la compañía.');
+        }
+    });
+    $('checkAll').addEventListener('change', function () { toggleAll(this); });
+    $('listaPersonasBody').addEventListener('change', function (e) {
+        if (e.target && e.target.classList.contains('chk-persona')) actualizarContador();
+    });
+    $('btnAsignarMasivo').addEventListener('click', guardarAsignacionMasiva);
+    $('tablaAsignacionesBody').addEventListener('click', function (e) {
+        const btn = e.target.closest('[data-del]');
+        if (btn) eliminarAsignacion(btn.getAttribute('data-del'));
+    });
+
+    (async function init() {
+        const hoy = new Date().toISOString().slice(0, 10);
+        $('fechaIni').value = hoy;
+        $('fechaFin').value = '';
+        try {
+            await cargarHorarios();
+            await cargarPersonal();
+        } catch (e) {
+            console.error(e);
+            alert('No se pudo inicializar la vista de asignación masiva.');
+        }
+    })();
+})();
+</script>
+{% endblock %}

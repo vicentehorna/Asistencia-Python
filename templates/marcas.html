@@ -130,8 +130,9 @@
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 let lastMarcasExcelPayload = null;
+const MARCAS_STORAGE_KEY = 'asistencia.gestion_marcas.state.v1';
 
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
     const hoy = new Date();
     const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
     const fi = document.getElementById('fechaInicio');
@@ -141,12 +142,34 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const ciaEl = document.getElementById('cia');
     if (ciaEl && ciaEl.value) {
-        poblarTrabajadores(ciaEl.value);
+        await poblarTrabajadores(ciaEl.value);
     }
     if (ciaEl) {
         ciaEl.addEventListener('change', function () {
             poblarTrabajadores(this.value);
         });
+    }
+
+    const saved = loadMarcasState();
+    if (saved && saved.filters) {
+        if (ciaEl && saved.filters.cia && optionExists(ciaEl, saved.filters.cia)) {
+            ciaEl.value = String(saved.filters.cia);
+            await poblarTrabajadores(ciaEl.value);
+        }
+        if (fi && saved.filters.fechaInicio) fi.value = String(saved.filters.fechaInicio);
+        if (ff && saved.filters.fechaFin) ff.value = String(saved.filters.fechaFin);
+        const personEl = document.getElementById('person');
+        if (personEl && saved.filters.person && optionExists(personEl, saved.filters.person)) {
+            personEl.value = String(saved.filters.person);
+        }
+        if (Array.isArray(saved.rows)) {
+            renderMarcasRows(saved.rows, {
+                cia: (saved.filters.cia || ''),
+                person: (saved.filters.person || '0'),
+                fechaInicio: (saved.filters.fechaInicio || ''),
+                fechaFin: (saved.filters.fechaFin || '')
+            });
+        }
     }
 });
 
@@ -164,6 +187,32 @@ function selectedOptionText(selectEl) {
 
 function normalizeCell(v) {
     return v == null ? '' : String(v).trim();
+}
+
+function optionExists(selectEl, value) {
+    if (!selectEl) return false;
+    return Array.prototype.some.call(selectEl.options || [], function (opt) {
+        return String(opt.value) === String(value);
+    });
+}
+
+function saveMarcasState(state) {
+    try {
+        localStorage.setItem(MARCAS_STORAGE_KEY, JSON.stringify(state || {}));
+    } catch (e) {
+        console.warn('No se pudo guardar estado de Gestión de Marcas.', e);
+    }
+}
+
+function loadMarcasState() {
+    try {
+        const raw = localStorage.getItem(MARCAS_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (e) {
+        return null;
+    }
 }
 
 async function exportMarcasExcel(data, meta) {
@@ -351,6 +400,92 @@ function buildFotoUrl(rutaFoto) {
     return base + '/' + parts.join('/');
 }
 
+function renderMarcasRows(rows, filters) {
+    const tbody = document.getElementById('tablaMarcasBody');
+    const btnExport = document.getElementById('btnExportMarcasExcel');
+    const ciaEl = document.getElementById('cia');
+    const personEl = document.getElementById('person');
+
+    tbody.innerHTML = '';
+    const dataRows = Array.isArray(rows) ? rows : [];
+    setRowCountMarcas(dataRows.length);
+
+    const exportRows = [];
+    dataRows.forEach(function (row) {
+        const dni = pickRow(row, ['DNI', 'dni']);
+        const nombre = pickRow(row, ['Nombre', 'nombre']);
+        const diaSem = pickRow(row, ['diasemana', 'DiaSemana']);
+        const fh = pickRow(row, ['FechaHoraIngreso', 'fechahoraingreso']);
+        const hora = pickRow(row, ['hora', 'Hora']);
+        const cargo = pickRow(row, ['cargo', 'Cargo']);
+        const rutaFoto = pickRow(row, ['RutaFoto', 'rutafoto']);
+        const horaDisplay = formatHoraConSegundos(hora, fh);
+
+        let fechaStr = '';
+        if (fh) {
+            try {
+                const d = new Date(fh);
+                if (!isNaN(d.getTime())) fechaStr = d.toLocaleDateString('es-PE');
+                else fechaStr = String(fh).split(' ')[0] || '';
+            } catch (ex) {
+                fechaStr = String(fh);
+            }
+        }
+
+        exportRows.push({
+            dni: dni,
+            nombre: nombre,
+            dia: diaSem,
+            fecha: fechaStr,
+            hora: horaDisplay,
+            cargo: cargo
+        });
+
+        let evidenciaHtml = '';
+        if (rutaFoto) {
+            const rf = escapeHtml(String(rutaFoto));
+            const nomEsc = escapeHtml(String(nombre));
+            evidenciaHtml = '<button type="button" class="btn btn-link btn-sm text-dark p-0" data-ruta="' + rf + '" data-nombre="' + nomEsc + '" title="Ver foto">' +
+                '<i class="bi bi-image fs-6"></i></button>';
+        } else {
+            evidenciaHtml = '<i class="bi bi-image text-muted opacity-25 fs-6" title="Sin foto"></i>';
+        }
+
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td class="text-start ps-3 text-muted">' + escapeHtml(dni) + '</td>' +
+            '<td class="text-start fw-bold" style="color: #475569;">' + escapeHtml(nombre) + '</td>' +
+            '<td>' + escapeHtml(diaSem) + '</td>' +
+            '<td>' + escapeHtml(fechaStr) + '</td>' +
+            '<td class="fw-bold">' + escapeHtml(horaDisplay) + '</td>' +
+            '<td class="text-start text-muted" style="font-size: 0.75rem;">' + escapeHtml(cargo) + '</td>' +
+            '<td>' + evidenciaHtml + '</td>';
+        const btn = tr.querySelector('button[data-ruta]');
+        if (btn) {
+            btn.addEventListener('click', function () {
+                verEvidencia(this.getAttribute('data-ruta'), this.getAttribute('data-nombre'));
+            });
+        }
+        tbody.appendChild(tr);
+    });
+
+    if (dataRows.length) {
+        lastMarcasExcelPayload = {
+            data: exportRows,
+            meta: {
+                compania: selectedOptionText(ciaEl),
+                trabajador: selectedOptionText(personEl) || 'TODOS LOS TRABAJADORES',
+                fechaini: (filters && filters.fechaInicio) || (document.getElementById('fechaInicio').value || ''),
+                fechafin: (filters && filters.fechaFin) || (document.getElementById('fechaFin').value || '')
+            }
+        };
+        if (btnExport) btnExport.disabled = false;
+    } else {
+        lastMarcasExcelPayload = null;
+        if (btnExport) btnExport.disabled = true;
+    }
+}
+
 document.getElementById('frmFiltros').addEventListener('submit', async function (e) {
     e.preventDefault();
     const cia = document.getElementById('cia').value;
@@ -358,8 +493,6 @@ document.getElementById('frmFiltros').addEventListener('submit', async function 
     const fechaFin = document.getElementById('fechaFin').value;
     const person = document.getElementById('person').value || '0';
     const btnExport = document.getElementById('btnExportMarcasExcel');
-
-    const tbody = document.getElementById('tablaMarcasBody');
 
     if (fechaInicio > fechaFin) {
         alert('La fecha inicio no puede ser mayor que la fecha fin.');
@@ -377,7 +510,6 @@ document.getElementById('frmFiltros').addEventListener('submit', async function 
             body: JSON.stringify({ cia: cia, fechaInicio: fechaInicio, fechaFin: fechaFin, person: person })
         });
         const result = await response.json();
-        tbody.innerHTML = '';
 
         if (!response.ok || !result.success) {
             setRowCountMarcas(0);
@@ -386,80 +518,11 @@ document.getElementById('frmFiltros').addEventListener('submit', async function 
         }
 
         const rows = Array.isArray(result.data) ? result.data : [];
-        setRowCountMarcas(rows.length);
-
-        const exportRows = [];
-
-        rows.forEach(function (row) {
-            const dni = pickRow(row, ['DNI', 'dni']);
-            const nombre = pickRow(row, ['Nombre', 'nombre']);
-            const diaSem = pickRow(row, ['diasemana', 'DiaSemana']);
-            const fh = pickRow(row, ['FechaHoraIngreso', 'fechahoraingreso']);
-            const hora = pickRow(row, ['hora', 'Hora']);
-            const cargo = pickRow(row, ['cargo', 'Cargo']);
-            const rutaFoto = pickRow(row, ['RutaFoto', 'rutafoto']);
-            const horaDisplay = formatHoraConSegundos(hora, fh);
-
-            let fechaStr = '';
-            if (fh) {
-                try {
-                    const d = new Date(fh);
-                    if (!isNaN(d.getTime())) fechaStr = d.toLocaleDateString('es-PE');
-                    else fechaStr = String(fh).split(' ')[0] || '';
-                } catch (ex) {
-                    fechaStr = String(fh);
-                }
-            }
-
-            exportRows.push({
-                dni: dni,
-                nombre: nombre,
-                dia: diaSem,
-                fecha: fechaStr,
-                hora: horaDisplay,
-                cargo: cargo
-            });
-
-            let evidenciaHtml = '';
-            if (rutaFoto) {
-                const rf = escapeHtml(String(rutaFoto));
-                const nomEsc = escapeHtml(String(nombre));
-                evidenciaHtml = '<button type="button" class="btn btn-link btn-sm text-dark p-0" data-ruta="' + rf + '" data-nombre="' + nomEsc + '" title="Ver foto">' +
-                    '<i class="bi bi-image fs-6"></i></button>';
-            } else {
-                evidenciaHtml = '<i class="bi bi-image text-muted opacity-25 fs-6" title="Sin foto"></i>';
-            }
-
-            const tr = document.createElement('tr');
-            tr.innerHTML =
-                '<td class="text-start ps-3 text-muted">' + escapeHtml(dni) + '</td>' +
-                '<td class="text-start fw-bold" style="color: #475569;">' + escapeHtml(nombre) + '</td>' +
-                '<td>' + escapeHtml(diaSem) + '</td>' +
-                '<td>' + escapeHtml(fechaStr) + '</td>' +
-                '<td class="fw-bold">' + escapeHtml(horaDisplay) + '</td>' +
-                '<td class="text-start text-muted" style="font-size: 0.75rem;">' + escapeHtml(cargo) + '</td>' +
-                '<td>' + evidenciaHtml + '</td>';
-            const btn = tr.querySelector('button[data-ruta]');
-            if (btn) {
-                btn.addEventListener('click', function () {
-                    verEvidencia(this.getAttribute('data-ruta'), this.getAttribute('data-nombre'));
-                });
-            }
-            tbody.appendChild(tr);
+        renderMarcasRows(rows, { cia: cia, person: person, fechaInicio: fechaInicio, fechaFin: fechaFin });
+        saveMarcasState({
+            filters: { cia: cia, person: person, fechaInicio: fechaInicio, fechaFin: fechaFin },
+            rows: rows
         });
-
-        if (rows.length && btnExport) {
-            lastMarcasExcelPayload = {
-                data: exportRows,
-                meta: {
-                    compania: selectedOptionText(document.getElementById('cia')),
-                    trabajador: selectedOptionText(document.getElementById('person')) || 'TODOS LOS TRABAJADORES',
-                    fechaini: fechaInicio,
-                    fechafin: fechaFin
-                }
-            };
-            btnExport.disabled = false;
-        }
     } catch (error) {
         console.error(error);
         setRowCountMarcas(0);

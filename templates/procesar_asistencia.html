@@ -7,9 +7,9 @@
 
     <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
         <div class="card-body bg-light p-3">
-            <div class="row g-3 align-items-end">
+            <form id="frmFiltrosProc" class="row g-3 align-items-end">
                 <div class="col-md-4">
-                    <label class="small fw-bold text-muted mb-1" for="companySelector">Compañía</label>
+                    <label class="form-label small fw-bold text-muted mb-1" for="companySelector">Compañía</label>
                     <select id="companySelector" class="form-select form-select-sm shadow-none border-secondary">
                         {% for c in companies %}
                         <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
@@ -19,19 +19,22 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="small fw-bold text-muted mb-1" for="fechaIni">Fecha Inicio</label>
+                    <label class="form-label small fw-bold text-muted mb-1" for="fechaIni">Fecha Inicio</label>
                     <input type="date" id="fechaIni" class="form-control form-control-sm shadow-none border-secondary">
                 </div>
                 <div class="col-md-2">
-                    <label class="small fw-bold text-muted mb-1" for="fechaFin">Fecha Fin</label>
+                    <label class="form-label small fw-bold text-muted mb-1" for="fechaFin">Fecha Fin</label>
                     <input type="date" id="fechaFin" class="form-control form-control-sm shadow-none border-secondary">
                 </div>
-                <div class="col-md-4 text-end">
-                    <button class="btn btn-primary btn-sm px-4 shadow-sm" id="btnBuscarPersonas" type="button">
-                        <i class="bi bi-search me-1"></i> Buscar Personal
-                    </button>
+                <div class="col-md-4"></div>
+                <div class="col-12 border-top pt-3 mt-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <button class="btn btn-primary btn-sm px-4" id="btnBuscarPersonas" type="submit">
+                            <i class="bi bi-search"></i> Consultar
+                        </button>
+                    </div>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -49,14 +52,16 @@
     <div class="card shadow-sm border-0">
         <div class="card-body p-0">
             <div class="table-responsive" style="max-height: 55vh; overflow-y: auto;">
-                <table class="table table-sm table-hover mb-0" id="tablaPersonas" style="font-size: 0.82rem;">
-                    <thead class="table-light sticky-top">
-                        <tr>
+                <table class="table table-sm table-hover table-bordered border align-middle mb-0" id="tablaPersonas" style="font-size: 0.85rem;">
+                    <thead class="table-light">
+                        <tr class="text-center">
                             <th class="ps-3" style="width: 40px;">
                                 <input type="checkbox" class="form-check-input shadow-none" id="checkAll">
                             </th>
-                            <th style="width: 120px;">Código</th>
-                            <th>Nombre del Trabajador</th>
+                            <th class="text-start" style="width: 120px;">Código</th>
+                            <th class="text-start">Nombre del Trabajador</th>
+                            <th style="width: 120px;">Fecha Ingreso</th>
+                            <th style="width: 120px;">Fecha Cese</th>
                             <th>Última Fecha Proc.</th>
                         </tr>
                     </thead>
@@ -82,6 +87,7 @@
     const checkAll = $('checkAll');
     const btnProcesar = $('btnProcesar');
     const btnBuscar = $('btnBuscarPersonas');
+    const frmFiltrosProc = $('frmFiltrosProc');
 
     function setDefaultDates() {
         const hoy = new Date();
@@ -104,6 +110,14 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    function dateUi(v) {
+        const s = String(v == null ? '' : v).trim();
+        if (!s) return '';
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toLocaleDateString('es-PE');
+        return s;
     }
 
     function getSelectedPersons() {
@@ -141,13 +155,17 @@
             data.forEach((p) => {
                 const person = p.Person == null ? '' : String(p.Person);
                 const name = p.Name == null ? '' : String(p.Name);
+                const entry = p.EntryDate == null ? '' : dateUi(p.EntryDate);
+                const cease = p.CeaseDate == null ? '' : dateUi(p.CeaseDate);
                 const ultima = p.ultimafecha == null ? '' : String(p.ultimafecha);
                 const tr = document.createElement('tr');
                 tr.innerHTML = ''
-                    + '<td class="ps-3"><input type="checkbox" class="form-check-input chk-persona" value="' + escapeHtml(person) + '"></td>'
-                    + '<td>' + escapeHtml(person) + '</td>'
-                    + '<td class="fw-bold">' + escapeHtml(name) + '</td>'
-                    + '<td class="text-muted small">' + escapeHtml(ultima || 'Nunca') + '</td>';
+                    + '<td class="text-center ps-3"><input type="checkbox" class="form-check-input chk-persona" value="' + escapeHtml(person) + '"></td>'
+                    + '<td class="text-start text-muted">' + escapeHtml(person) + '</td>'
+                    + '<td class="text-start fw-bold">' + escapeHtml(name) + '</td>'
+                    + '<td class="text-center text-muted small">' + escapeHtml(entry || '-') + '</td>'
+                    + '<td class="text-center text-muted small">' + escapeHtml(cease || '-') + '</td>'
+                    + '<td class="text-center text-muted small">' + escapeHtml(ultima || 'Nunca') + '</td>';
                 body.appendChild(tr);
             });
             $('totalTrabajadores').innerText = data.length === 1 ? '1 trabajador' : data.length + ' trabajadores';
@@ -227,6 +245,7 @@
             ? ('Completado. Errores: ' + errores + '. Refrescando lista...')
             : 'Completado. Refrescando lista...';
         await cargarPersonas(true);
+        resetProgress();
         refreshSelectionState();
     }
 
@@ -241,7 +260,10 @@
         }
     });
 
-    btnBuscar.addEventListener('click', cargarPersonas);
+    frmFiltrosProc.addEventListener('submit', function (e) {
+        e.preventDefault();
+        cargarPersonas();
+    });
     btnProcesar.addEventListener('click', iniciarProcesamiento);
 
     setDefaultDates();
