@@ -202,6 +202,13 @@ def reporte_resumen():
     return render_template('reporte_resumen.html')
 
 
+@app.route('/reporte-consolidado')
+@login_required
+def reporte_consolidado():
+    ensure_user_session()
+    return render_template('reporte_consolidado.html')
+
+
 def _companias_permitidas_ids():
     return {str(c.get('id', '')).strip() for c in get_companias_selector() if c.get('id') is not None}
 
@@ -606,7 +613,31 @@ def api_eliminar_justificacion_persona(record_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT TOP 1 company, Person, FechaInicio, FechaFin
+            FROM CA_JustificacionPersona
+            WHERE Id=?
+            """,
+            (record_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({"success": False, "error": "No se encontró la justificación."}), 404
+
+        cia = _jsonable_value(getattr(row, "company", None))
+        person = _jsonable_value(getattr(row, "Person", None))
+        fecha_inicio = getattr(row, "FechaInicio", None)
+        fecha_fin = getattr(row, "FechaFin", None)
+        if not cia or not person or not fecha_inicio or not fecha_fin:
+            return jsonify({"success": False, "error": "La justificación no tiene datos válidos para reproceso."}), 400
+
         cursor.execute("DELETE FROM CA_JustificacionPersona WHERE Id=?", (record_id,))
+        # Reprocesa asistencia para recalcular el rango afectado por la justificación eliminada.
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_procesarasistencia_web] @cia=?, @person=?, @fechaini=?, @fechafin=?",
+            (cia, person, fecha_inicio, fecha_fin),
+        )
         conn.commit()
         return jsonify({"success": True})
     except Exception as e:
@@ -757,19 +788,41 @@ def api_marca_manual():
 @login_required
 def api_personas_asistencia():
     cia = (request.args.get('cia') or '').strip()
+    fechaini = (request.args.get('fechaIni') or request.args.get('fechaini') or '').strip()
+    fechafin = (request.args.get('fechaFin') or request.args.get('fechafin') or '').strip()
     if not cia or cia not in _companias_permitidas_ids():
         return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    if not fechaini or not fechafin:
+        return jsonify({"success": False, "error": "Indique fecha inicio y fecha fin.", "data": []}), 400
+    try:
+        d_ini = datetime.strptime(fechaini[:10], '%Y-%m-%d').date()
+        d_fin = datetime.strptime(fechafin[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"success": False, "error": "Fechas no válidas.", "data": []}), 400
+    if d_fin < d_ini:
+        return jsonify({"success": False, "error": "La fecha fin no puede ser anterior a la fecha inicio.", "data": []}), 400
+
+    # pyodbc + ODBC Driver for SQL Server antiguo: binding de Python date -> HYC00 "no implementado".
+    # Usar datetime (inicio del día) para @fechaini / @fechafin; el SP usa CONVERT(DATE, ...).
+    dt_ini = datetime.combine(d_ini, time.min)
+    dt_fin = datetime.combine(d_fin, time.min)
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("EXEC [dbo].[sp_pr_selectorpersonasCA_web] @cia=?", (cia,))
+        cursor.execute(
+            "EXEC [dbo].[sp_pr_selectorpersonasCA_web] @cia=?, @fechaini=?, @fechafin=?",
+            (cia, dt_ini, dt_fin),
+        )
         data = []
         for row in cursor.fetchall():
             ultima = getattr(row, 'ultimafecha', None)
             entry = getattr(row, 'EntryDate', None)
             cease = getattr(row, 'CeaseDate', None)
+            horario = getattr(row, 'Horario', None)
+            if horario is None:
+                horario = getattr(row, 'horario', None)
             if isinstance(ultima, datetime):
                 ultima_fmt = ultima.strftime('%d/%m/%Y %H:%M')
             elif isinstance(ultima, date):
@@ -792,6 +845,7 @@ def api_personas_asistencia():
                 {
                     "Person": _jsonable_value(getattr(row, 'Person', None)),
                     "Name": _jsonable_value(getattr(row, 'Name', None)),
+                    "Horario": _jsonable_value(horario),
                     "EntryDate": entry_fmt,
                     "CeaseDate": cease_fmt,
                     "ultimafecha": ultima_fmt,
@@ -1101,6 +1155,52 @@ def api_reporte_resumen_asistencia():
         return jsonify(data)
     except Exception as e:
         logging.exception("api_reporte_resumen_asistencia")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/reportes/consolidado-asistencia', methods=['POST'])
+@login_required
+def api_reporte_consolidado_asistencia():
+    """sp_ca_reporteconsolidado_web @cia, @person, @fechaini, @fechafin."""
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    fechaini = (body.get('fechaini') or '').strip()
+    fechafin = (body.get('fechafin') or '').strip()
+    person = (body.get('person') or '0').strip() or '0'
+
+    if not cia:
+        return jsonify({"error": "Seleccione una compañía."}), 400
+    if not fechaini or not fechafin:
+        return jsonify({"error": "Debe indicar fecha inicio y fecha fin."}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_reporteconsolidado_web] @cia=?, @person=?, @fechaini=?, @fechafin=?",
+            (cia, person, fechaini, fechafin),
+        )
+        columns, rows = _fetch_first_nonempty_resultset(cursor)
+        if not rows:
+            return jsonify([])
+
+        data = []
+        for row in rows:
+            item = {}
+            for col, val in zip(columns, row):
+                key = str(col).strip().lower()
+                item[key] = _jsonable_value(val)
+            data.append(item)
+        return jsonify(data)
+    except Exception as e:
+        logging.exception("api_reporte_consolidado_asistencia")
         return jsonify({"error": str(e)}), 500
     finally:
         if conn:

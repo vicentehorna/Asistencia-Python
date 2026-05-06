@@ -1,35 +1,34 @@
 {% extends "layout.html" %}
 
-{% block title %}Resumen de Asistencia{% endblock %}
+{% block title %}Consolidado de Asistencia{% endblock %}
 
 {% block extra_css %}
 <style>
-    /* Tabla compacta: cabe en pantalla típica sin scroll horizontal */
-    #cardResultado .table-resumen-asistencia {
+    #cardResultado .table-consolidado-asistencia {
         table-layout: fixed;
         width: 100%;
-        font-size: 0.72rem;
+        font-size: 0.8rem;
     }
-    #cardResultado .table-resumen-asistencia th,
-    #cardResultado .table-resumen-asistencia td {
-        padding: 0.28rem 0.35rem;
+    #cardResultado .table-consolidado-asistencia th,
+    #cardResultado .table-consolidado-asistencia td {
+        padding: 0.35rem 0.5rem;
         vertical-align: middle;
         word-break: break-word;
         white-space: normal;
-        line-height: 1.2;
+        line-height: 1.25;
     }
-    #cardResultado .table-resumen-asistencia .col-num {
+    #cardResultado .table-consolidado-asistencia .col-num {
         text-align: right;
         font-variant-numeric: tabular-nums;
     }
-    #cardResultado .table-resumen-asistencia .col-center {
+    #cardResultado .table-consolidado-asistencia .col-center {
         text-align: center;
     }
-    #cardResultado .table-resumen-asistencia .col-mono {
+    #cardResultado .table-consolidado-asistencia .col-mono {
         font-family: ui-monospace, monospace;
-        font-size: 0.68rem;
+        font-size: 0.75rem;
     }
-    #tbody-resumen-asistencia tr.fila-falta td {
+    #tbody-consolidado-asistencia tr.fila-con-falta td {
         background-color: #fff3cd;
     }
 </style>
@@ -41,7 +40,7 @@
         <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-funnel"></i> Filtros del Reporte</h5>
     </div>
     <div class="card-body">
-        <form id="frmResumenAsistencia" class="row g-3">
+        <form id="frmConsolidadoAsistencia" class="row g-3">
             <div class="col-md-4">
                 <label for="cboCompania" class="form-label small fw-bold text-muted">Compañía</label>
                 <select id="cboCompania" class="form-select form-select-sm" required>
@@ -80,43 +79,27 @@
 
 <div class="card shadow-sm border-0 d-none" id="cardResultado">
     <div class="card-body">
-        <h4 class="text-center fw-bold mb-4">RESUMEN DE ASISTENCIA</h4>
+        <h4 class="text-center fw-bold mb-4">CONSOLIDADO DE ASISTENCIA</h4>
 
         <div class="table-responsive border rounded overflow-hidden">
-            <table class="table table-sm table-hover table-bordered border align-middle mb-0 table-resumen-asistencia">
+            <table class="table table-sm table-hover table-bordered border align-middle mb-0 table-consolidado-asistencia">
                 <colgroup>
-                    <col style="width: 5.5%;">
-                    <col style="width: 13%;">
-                    <col style="width: 6.5%;">
-                    <col style="width: 3.5%;">
-                    <col style="width: 9%;">
-                    <col style="width: 5%;">
-                    <col style="width: 5%;">
-                    <col style="width: 5%;">
-                    <col style="width: 5%;">
-                    <col style="width: 3.5%;">
-                    <col style="width: 4.5%;">
-                    <col style="width: 4.5%;">
-                    <col style="width: 24%;">
+                    <col style="width: 12%;">
+                    <col style="width: 38%;">
+                    <col style="width: 16%;">
+                    <col style="width: 12%;">
+                    <col style="width: 22%;">
                 </colgroup>
                 <thead class="table-light">
                     <tr class="text-center">
                         <th>PERS.</th>
                         <th>NOMBRE</th>
-                        <th>FECHA</th>
-                        <th>DÍA</th>
-                        <th>HORARIO</th>
-                        <th>ENTR.</th>
-                        <th>S.REF</th>
-                        <th>E.REF</th>
-                        <th>SAL.</th>
-                        <th>FALTA</th>
-                        <th>M.TARDE</th>
-                        <th>M.ADIC.</th>
-                        <th>MOTIVO</th>
+                        <th>TARDANZA (HH:MM)</th>
+                        <th>FALTAS</th>
+                        <th>ADIC. (HH:MM)</th>
                     </tr>
                 </thead>
-                <tbody id="tbody-resumen-asistencia"></tbody>
+                <tbody id="tbody-consolidado-asistencia"></tbody>
             </table>
         </div>
     </div>
@@ -131,13 +114,13 @@ document.addEventListener('DOMContentLoaded', async function () {
     const cboTrabajador = document.getElementById('cboTrabajador');
     const txtFechaIni = document.getElementById('txtFechaIni');
     const txtFechaFin = document.getElementById('txtFechaFin');
-    const frm = document.getElementById('frmResumenAsistencia');
+    const frm = document.getElementById('frmConsolidadoAsistencia');
     const btnExportExcel = document.getElementById('btnExportExcel');
-    const tbody = document.getElementById('tbody-resumen-asistencia');
+    const tbody = document.getElementById('tbody-consolidado-asistencia');
     const cardResultado = document.getElementById('cardResultado');
     const lblRowCount = document.getElementById('lblRowCount');
-    let lastResumenAsistenciaExport = null;
-    const STORAGE_KEY = 'asistencia.reporte_resumen.state.v1';
+    let lastExportPayload = null;
+    const STORAGE_KEY = 'asistencia.reporte_consolidado.state.v1';
 
     function setRowCount(n) {
         const num = Math.max(0, parseInt(n, 10) || 0);
@@ -149,7 +132,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         try {
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state || {}));
         } catch (e) {
-            console.warn('No se pudo persistir estado del reporte.', e);
+            console.warn('No se pudo persistir estado del consolidado.', e);
         }
     }
 
@@ -172,21 +155,32 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const normalizeValue = (v) => (v == null ? '' : String(v).trim());
     const formatDateIso = (d) => d.toISOString().slice(0, 10);
-    const formatHoraHHMM = (v) => {
-        const s = normalizeValue(v);
-        if (!s) return '';
-        const m = s.match(/(\d{1,2}):(\d{2})/);
-        if (!m) return s;
-        return `${m[1].padStart(2, '0')}:${m[2]}`;
-    };
-    const esFalta = (v) => normalizeValue(v).toLowerCase() === 'si';
 
-    function pickMinutosAdicionales(row) {
-        if (!row || typeof row !== 'object') return '';
-        const v = row.minutosadicionales != null ? row.minutosadicionales
-            : row.MinutosAdicionales != null ? row.MinutosAdicionales
-            : row.minutosAdicionales;
-        return normalizeValue(v);
+    function pickPerson(row) {
+        return normalizeValue(row.person != null ? row.person : row.Person);
+    }
+    function pickName(row) {
+        return normalizeValue(row.name != null ? row.name : row.Name);
+    }
+    function pickTardanza(row) {
+        return normalizeValue(row.tardanza != null ? row.tardanza : row.Tardanza);
+    }
+    function pickFaltas(row) {
+        return normalizeValue(row.faltas != null ? row.faltas : row.Faltas);
+    }
+    function pickAdicional(row) {
+        return normalizeValue(row.adicional != null ? row.adicional : row.Adicional);
+    }
+
+    function formatMinutesHHMM(value) {
+        const raw = normalizeValue(value);
+        if (raw === '') return '00:00';
+        const n = parseInt(raw, 10);
+        if (isNaN(n)) return raw;
+        const total = Math.max(0, n);
+        const hh = String(Math.floor(total / 60)).padStart(2, '0');
+        const mm = String(total % 60).padStart(2, '0');
+        return `${hh}:${mm}`;
     }
 
     function setDefaultDates() {
@@ -231,24 +225,16 @@ document.addEventListener('DOMContentLoaded', async function () {
         tbody.innerHTML = '';
         data.forEach((row) => {
             const tr = document.createElement('tr');
-            if (esFalta(row.falta)) {
-                tr.classList.add('fila-falta');
+            const faltasN = parseInt(pickFaltas(row), 10);
+            if (!isNaN(faltasN) && faltasN > 0) {
+                tr.classList.add('fila-con-falta');
             }
-            const madic = pickMinutosAdicionales(row);
             tr.innerHTML = `
-                <td class="col-center col-mono">${escapeHtml(normalizeValue(row.person))}</td>
-                <td>${escapeHtml(normalizeValue(row.name))}</td>
-                <td class="col-center">${escapeHtml(normalizeValue(row.fecha))}</td>
-                <td class="col-center">${escapeHtml(normalizeValue(row.diasem))}</td>
-                <td>${escapeHtml(normalizeValue(row.nombrehorario))}</td>
-                <td class="col-center">${escapeHtml(formatHoraHHMM(row.entrada))}</td>
-                <td class="col-center">${escapeHtml(formatHoraHHMM(row.salidarefri))}</td>
-                <td class="col-center">${escapeHtml(formatHoraHHMM(row.entradarefri))}</td>
-                <td class="col-center">${escapeHtml(formatHoraHHMM(row.salida))}</td>
-                <td class="col-center">${escapeHtml(normalizeValue(row.falta))}</td>
-                <td class="col-num">${escapeHtml(normalizeValue(row.minutostarde))}</td>
-                <td class="col-num">${escapeHtml(madic)}</td>
-                <td>${escapeHtml(normalizeValue(row.motivo))}</td>
+                <td class="col-center col-mono">${escapeHtml(pickPerson(row))}</td>
+                <td>${escapeHtml(pickName(row))}</td>
+                <td class="col-num">${escapeHtml(formatMinutesHHMM(pickTardanza(row)))}</td>
+                <td class="col-num">${escapeHtml(pickFaltas(row))}</td>
+                <td class="col-num">${escapeHtml(formatMinutesHHMM(pickAdicional(row)))}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -266,15 +252,15 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
-    async function exportResumenAsistenciaExcel(data, meta) {
+    async function exportExcel(data, meta) {
         if (typeof ExcelJS === 'undefined') {
             alert('No se pudo cargar la librería de Excel (ExcelJS). Recargue la página e intente de nuevo.');
             return;
         }
 
-        const header = ['PERSONA', 'NOMBRE', 'FECHA', 'DÍA', 'HORARIO', 'ENTRADA', 'SALIDA REFRI', 'ENTRADA REFRI', 'SALIDA', 'FALTA', 'MIN. TARDE', 'MIN. ADIC.', 'MOTIVO'];
+        const header = ['PERSONA', 'NOMBRE', 'TARDANZA (HH:MM)', 'FALTAS', 'ADICIONALES (HH:MM)'];
         const wb = new ExcelJS.Workbook();
-        const ws = wb.addWorksheet('Resumen Asistencia', { views: [{ showGridLines: true }] });
+        const ws = wb.addWorksheet('Consolidado', { views: [{ showGridLines: true }] });
 
         const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
         const borderThin = { style: 'thin', color: { argb: 'FFCCCCCC' } };
@@ -282,7 +268,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         ws.mergeCells(1, 1, 1, header.length);
         const t = ws.getCell(1, 1);
-        t.value = 'REPORTE RESUMEN DE ASISTENCIA';
+        t.value = 'CONSOLIDADO DE ASISTENCIA';
         t.font = { bold: true, size: 14 };
         t.alignment = { horizontal: 'center', vertical: 'middle' };
         t.fill = fill('FFE9ECEF');
@@ -294,7 +280,6 @@ document.addEventListener('DOMContentLoaded', async function () {
             'Trabajador', meta.trabajador || '',
             'F. Inicio', meta.fechaini || '',
             'F. Fin', meta.fechafin || '',
-            '', ''
         ]);
         metaRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
             if (colNumber <= 8) {
@@ -316,30 +301,21 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
 
         data.forEach((row) => {
-            const falta = normalizeValue(row.falta);
-            const madic = pickMinutosAdicionales(row);
+            const faltasN = parseInt(pickFaltas(row), 10);
+            const isFalta = !isNaN(faltasN) && faltasN > 0;
             const r = ws.addRow([
-                normalizeValue(row.person),
-                normalizeValue(row.name),
-                normalizeValue(row.fecha),
-                normalizeValue(row.diasem),
-                normalizeValue(row.nombrehorario),
-                formatHoraHHMM(row.entrada),
-                formatHoraHHMM(row.salidarefri),
-                formatHoraHHMM(row.entradarefri),
-                formatHoraHHMM(row.salida),
-                falta,
-                normalizeValue(row.minutostarde),
-                madic,
-                normalizeValue(row.motivo),
+                pickPerson(row),
+                pickName(row),
+                formatMinutesHHMM(pickTardanza(row)),
+                pickFaltas(row),
+                formatMinutesHHMM(pickAdicional(row)),
             ]);
-            const isFalta = esFalta(falta);
             r.eachCell((cell, colNumber) => {
                 cell.border = allBorders;
                 cell.fill = fill(isFalta ? 'FFFFF3CD' : 'FFFFFFFF');
-                if ([1, 3, 4, 6, 7, 8, 9, 10].includes(colNumber)) {
+                if (colNumber === 1) {
                     cell.alignment = { horizontal: 'center', vertical: 'middle' };
-                } else if (colNumber === 11 || colNumber === 12) {
+                } else if (colNumber >= 3) {
                     cell.alignment = { horizontal: 'right', vertical: 'middle' };
                 } else {
                     cell.alignment = { horizontal: 'left', vertical: 'middle' };
@@ -347,19 +323,11 @@ document.addEventListener('DOMContentLoaded', async function () {
             });
         });
 
-        ws.getColumn(1).width = 11;
-        ws.getColumn(2).width = 26;
-        ws.getColumn(3).width = 11;
-        ws.getColumn(4).width = 9;
-        ws.getColumn(5).width = 16;
-        ws.getColumn(6).width = 10;
-        ws.getColumn(7).width = 12;
-        ws.getColumn(8).width = 12;
-        ws.getColumn(9).width = 10;
-        ws.getColumn(10).width = 8;
-        ws.getColumn(11).width = 10;
-        ws.getColumn(12).width = 10;
-        ws.getColumn(13).width = 28;
+        ws.getColumn(1).width = 14;
+        ws.getColumn(2).width = 36;
+        ws.getColumn(3).width = 16;
+        ws.getColumn(4).width = 10;
+        ws.getColumn(5).width = 14;
 
         const buffer = await wb.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -368,7 +336,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         const stamp = new Date().toISOString().slice(0, 10);
         const safe = (s) => String(s || 'export').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 80);
         a.href = url;
-        a.download = `resumen_asistencia_${safe(meta.compania)}_${stamp}.xlsx`;
+        a.download = `consolidado_asistencia_${safe(meta.compania)}_${stamp}.xlsx`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -395,7 +363,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             renderRows(saved.data);
             setRowCount(saved.data.length);
             cardResultado.classList.remove('d-none');
-            lastResumenAsistenciaExport = {
+            lastExportPayload = {
                 data: saved.data,
                 meta: saved.meta || {
                     compania: selectedText(cboCompania),
@@ -413,7 +381,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         cardResultado.classList.add('d-none');
         tbody.innerHTML = '';
         setRowCount(0);
-        lastResumenAsistenciaExport = null;
+        lastExportPayload = null;
         btnExportExcel.disabled = true;
         if (!cia) {
             cboTrabajador.innerHTML = '<option value="0">Todos</option>';
@@ -444,7 +412,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
 
         try {
-            const res = await fetch('/api/reportes/resumen-asistencia', {
+            const res = await fetch('/api/reportes/consolidado-asistencia', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cia, fechaini, fechafin, person })
@@ -454,7 +422,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             if (!res.ok) {
                 cardResultado.classList.add('d-none');
                 setRowCount(0);
-                lastResumenAsistenciaExport = null;
+                lastExportPayload = null;
                 btnExportExcel.disabled = true;
                 alert(data.error || 'Error al consultar el reporte.');
                 return;
@@ -462,7 +430,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             if (!Array.isArray(data)) {
                 cardResultado.classList.add('d-none');
                 setRowCount(0);
-                lastResumenAsistenciaExport = null;
+                lastExportPayload = null;
                 btnExportExcel.disabled = true;
                 alert('Respuesta inválida del servidor.');
                 return;
@@ -471,7 +439,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 tbody.innerHTML = '';
                 cardResultado.classList.add('d-none');
                 setRowCount(0);
-                lastResumenAsistenciaExport = null;
+                lastExportPayload = null;
                 btnExportExcel.disabled = true;
                 alert('No se encontraron registros para los filtros seleccionados.');
                 return;
@@ -480,7 +448,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             renderRows(data);
             setRowCount(data.length);
             cardResultado.classList.remove('d-none');
-            lastResumenAsistenciaExport = {
+            lastExportPayload = {
                 data,
                 meta: {
                     compania: selectedText(cboCompania),
@@ -493,25 +461,25 @@ document.addEventListener('DOMContentLoaded', async function () {
             saveState({
                 filters: { cia, person, fechaini, fechafin },
                 data: data,
-                meta: lastResumenAsistenciaExport.meta
+                meta: lastExportPayload.meta
             });
         } catch (err) {
             console.error(err);
             cardResultado.classList.add('d-none');
             setRowCount(0);
-            lastResumenAsistenciaExport = null;
+            lastExportPayload = null;
             btnExportExcel.disabled = true;
             alert('Error de red o del servidor.');
         }
     });
 
     btnExportExcel.addEventListener('click', async function () {
-        if (!lastResumenAsistenciaExport || !lastResumenAsistenciaExport.data || !lastResumenAsistenciaExport.data.length) {
+        if (!lastExportPayload || !lastExportPayload.data || !lastExportPayload.data.length) {
             alert('Ejecute primero una búsqueda con resultados.');
             return;
         }
         try {
-            await exportResumenAsistenciaExcel(lastResumenAsistenciaExport.data, lastResumenAsistenciaExport.meta);
+            await exportExcel(lastExportPayload.data, lastExportPayload.meta);
         } catch (err) {
             console.error(err);
             alert('No se pudo generar el archivo Excel.');

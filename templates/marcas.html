@@ -5,12 +5,15 @@
 {% block content %}
 <div id="marcasRoot" class="container-fluid py-3" data-photos-base="{{ photos_base | e }}">
     <h4 class="fw-bold mb-3" style="color: #1e293b;">Gestión de Marcas</h4>
-    <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
-        <div class="card-body bg-light p-3">
-            <form id="frmFiltros" class="row g-3 align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label small fw-bold text-muted mb-1" for="cia">Compañía</label>
-                    <select id="cia" name="cia" class="form-select form-select-sm shadow-none border-secondary" required>
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+            <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-funnel"></i> Filtros del Reporte</h5>
+        </div>
+        <div class="card-body">
+            <form id="frmFiltros" class="row g-3">
+                <div class="col-md-4">
+                    <label for="cia" class="form-label small fw-bold text-muted">Compañía</label>
+                    <select id="cia" name="cia" class="form-select form-select-sm" required>
                         {% for c in companies %}
                         <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
                         {% else %}
@@ -19,20 +22,21 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold text-muted mb-1" for="fechaInicio">Fecha Inicio</label>
-                    <input type="date" id="fechaInicio" name="fechaInicio" class="form-control form-control-sm border-secondary shadow-none" required>
+                    <label for="fechaInicio" class="form-label small fw-bold text-muted">Fecha Inicio</label>
+                    <input type="date" id="fechaInicio" name="fechaInicio" class="form-control form-control-sm" required>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold text-muted mb-1" for="fechaFin">Fecha Fin</label>
-                    <input type="date" id="fechaFin" name="fechaFin" class="form-control form-control-sm border-secondary shadow-none" required>
+                    <label for="fechaFin" class="form-label small fw-bold text-muted">Fecha Fin</label>
+                    <input type="date" id="fechaFin" name="fechaFin" class="form-control form-control-sm" required>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label small fw-bold text-muted mb-1" for="person"><i class="bi bi-person-bounding-box me-1"></i> Filtrar por Trabajador</label>
-                    <select id="person" name="person" class="form-select form-select-sm shadow-none border-secondary" disabled>
-                        <option value="0">TODOS LOS TRABAJADORES</option>
+                <div class="col-md-4">
+                    <label for="person" class="form-label small fw-bold text-muted">Trabajador</label>
+                    <select id="person" name="person" class="form-select form-select-sm" disabled>
+                        <option value="0">Todos</option>
                     </select>
                 </div>
-                <div class="col-12 border-top pt-3 mt-1">
+
+                <div class="col-12 border-top pt-3 mt-3">
                     <div class="d-flex flex-wrap align-items-center gap-2">
                         <button type="submit" class="btn btn-primary btn-sm px-4">
                             <i class="bi bi-search"></i> Consultar
@@ -40,7 +44,7 @@
                         <button type="button" class="btn btn-success btn-sm px-4" id="btnExportMarcasExcel" disabled>
                             <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
                         </button>
-                        <button type="button" class="btn btn-success btn-sm px-4 shadow-sm" onclick="abrirModalManual()">
+                        <button type="button" class="btn btn-success btn-sm px-4" onclick="abrirModalManual()">
                             <i class="bi bi-plus-lg"></i> Manual
                         </button>
                         <span class="ms-auto small text-muted fw-bold" id="lblRowCountMarcas">0 registros</span>
@@ -327,7 +331,7 @@ async function poblarTrabajadores(cia) {
     const sel = document.getElementById('person');
     if (!sel) return;
     if (!cia) {
-        sel.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+        sel.innerHTML = '<option value="0">Todos</option>';
         sel.disabled = true;
         return;
     }
@@ -336,7 +340,7 @@ async function poblarTrabajadores(cia) {
     try {
         const res = await fetch('/api/selectores/trabajadores?cia=' + encodeURIComponent(cia));
         const data = await res.json();
-        sel.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+        sel.innerHTML = '<option value="0">Todos</option>';
         (Array.isArray(data) ? data : []).forEach(function (item) {
             const opt = document.createElement('option');
             opt.value = item.id != null ? String(item.id) : '';
@@ -346,7 +350,7 @@ async function poblarTrabajadores(cia) {
         sel.disabled = false;
     } catch (e) {
         console.error(e);
-        sel.innerHTML = '<option value="0">TODOS LOS TRABAJADORES</option>';
+        sel.innerHTML = '<option value="0">Todos</option>';
         sel.disabled = false;
     }
 }
@@ -474,7 +478,7 @@ function renderMarcasRows(rows, filters) {
             data: exportRows,
             meta: {
                 compania: selectedOptionText(ciaEl),
-                trabajador: selectedOptionText(personEl) || 'TODOS LOS TRABAJADORES',
+                trabajador: selectedOptionText(personEl) || 'Todos',
                 fechaini: (filters && filters.fechaInicio) || (document.getElementById('fechaInicio').value || ''),
                 fechafin: (filters && filters.fechaFin) || (document.getElementById('fechaFin').value || '')
             }

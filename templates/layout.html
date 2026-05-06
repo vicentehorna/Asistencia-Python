@@ -164,6 +164,11 @@
                         <i class="bi bi-table"></i> Resumen de Asistencia
                     </a>
                 </li>
+                <li class="{{ 'active' if request.endpoint == 'reporte_consolidado' else '' }}">
+                    <a href="{{ url_for('reporte_consolidado') }}">
+                        <i class="bi bi-bar-chart-steps"></i> Consolidado de Asistencia
+                    </a>
+                </li>
 
                 <hr class="mx-3 opacity-25 mt-4">
 

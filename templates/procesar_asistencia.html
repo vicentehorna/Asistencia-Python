@@ -1,16 +1,27 @@
 {% extends "layout.html" %}
 {% block title %}Procesar Asistencia{% endblock %}
 
+{% block extra_css %}
+<style>
+    #listaPersonasBody td {
+        white-space: nowrap;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid py-3">
     <h4 class="fw-bold mb-3" style="color: #1e293b;"><i class="bi bi-cpu me-2"></i>Procesar Asistencia</h4>
 
-    <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
-        <div class="card-body bg-light p-3">
-            <form id="frmFiltrosProc" class="row g-3 align-items-end">
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+            <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-funnel"></i> Filtros del Reporte</h5>
+        </div>
+        <div class="card-body">
+            <form id="frmFiltrosProc" class="row g-3">
                 <div class="col-md-4">
-                    <label class="form-label small fw-bold text-muted mb-1" for="companySelector">Compañía</label>
-                    <select id="companySelector" class="form-select form-select-sm shadow-none border-secondary">
+                    <label for="companySelector" class="form-label small fw-bold text-muted">Compañía</label>
+                    <select id="companySelector" class="form-select form-select-sm" required>
                         {% for c in companies %}
                         <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.name }}</option>
                         {% else %}
@@ -19,19 +30,24 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold text-muted mb-1" for="fechaIni">Fecha Inicio</label>
-                    <input type="date" id="fechaIni" class="form-control form-control-sm shadow-none border-secondary">
+                    <label for="fechaIni" class="form-label small fw-bold text-muted">Fecha Inicio</label>
+                    <input type="date" id="fechaIni" class="form-control form-control-sm" required>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold text-muted mb-1" for="fechaFin">Fecha Fin</label>
-                    <input type="date" id="fechaFin" class="form-control form-control-sm shadow-none border-secondary">
+                    <label for="fechaFin" class="form-label small fw-bold text-muted">Fecha Fin</label>
+                    <input type="date" id="fechaFin" class="form-control form-control-sm" required>
                 </div>
-                <div class="col-md-4"></div>
-                <div class="col-12 border-top pt-3 mt-1">
+                <div class="col-md-4 d-none d-md-block"></div>
+
+                <div class="col-12 border-top pt-3 mt-3">
                     <div class="d-flex flex-wrap align-items-center gap-2">
-                        <button class="btn btn-primary btn-sm px-4" id="btnBuscarPersonas" type="submit">
+                        <button type="submit" class="btn btn-primary btn-sm px-4" id="btnBuscarPersonas">
                             <i class="bi bi-search"></i> Consultar
                         </button>
+                        <button type="button" id="btnProcesar" class="btn btn-success btn-sm px-4 d-none">
+                            <i class="bi bi-gear-wide-connected me-1"></i> Iniciar Proceso
+                        </button>
+                        <span class="ms-auto small text-muted fw-bold" id="lblFiltroPersonas">0 trabajadores</span>
                     </div>
                 </div>
             </form>
@@ -58,22 +74,17 @@
                             <th class="ps-3" style="width: 40px;">
                                 <input type="checkbox" class="form-check-input shadow-none" id="checkAll">
                             </th>
-                            <th class="text-start" style="width: 120px;">Código</th>
-                            <th class="text-start">Nombre del Trabajador</th>
-                            <th style="width: 120px;">Fecha Ingreso</th>
-                            <th style="width: 120px;">Fecha Cese</th>
-                            <th>Última Fecha Proc.</th>
+                            <th style="width: 120px;">CÓDIGO</th>
+                            <th>NOMBRE DEL TRABAJADOR</th>
+                            <th>HORARIO</th>
+                            <th style="width: 120px;">FECHA INGRESO</th>
+                            <th style="width: 120px;">FECHA CESE</th>
+                            <th>ÚLTIMA FECHA PROC.</th>
                         </tr>
                     </thead>
                     <tbody id="listaPersonasBody"></tbody>
                 </table>
             </div>
-        </div>
-        <div class="card-footer bg-white d-flex justify-content-between align-items-center py-2">
-            <span class="small text-muted" id="totalTrabajadores">0 trabajadores</span>
-            <button id="btnProcesar" class="btn btn-success btn-sm px-4 d-none" type="button">
-                <i class="bi bi-gear-wide-connected me-1"></i> Iniciar Proceso
-            </button>
         </div>
     </div>
 </div>
@@ -82,18 +93,83 @@
 {% block extra_js %}
 <script>
 (function () {
+    const STORAGE_KEY = 'asistencia.procesar_asistencia.state.v1';
     const $ = (id) => document.getElementById(id);
     const body = $('listaPersonasBody');
     const checkAll = $('checkAll');
     const btnProcesar = $('btnProcesar');
     const btnBuscar = $('btnBuscarPersonas');
     const frmFiltrosProc = $('frmFiltrosProc');
+    const selCia = $('companySelector');
+    const inpIni = $('fechaIni');
+    const inpFin = $('fechaFin');
+
+    let lastLoadedRows = [];
+
+    function setPersonasCount(n) {
+        const num = Math.max(0, parseInt(n, 10) || 0);
+        const txt = num === 1 ? '1 trabajador' : num + ' trabajadores';
+        const lbl = $('lblFiltroPersonas');
+        if (lbl) lbl.textContent = txt;
+    }
+
+    function saveState(state) {
+        try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state || {}));
+        } catch (e) {
+            console.warn('No se pudo persistir Procesar Asistencia.', e);
+        }
+    }
+
+    function loadState() {
+        try {
+            const raw = window.localStorage.getItem(STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function optionExists(selectEl, value) {
+        if (!selectEl) return false;
+        return Array.prototype.some.call(selectEl.options || [], function (opt) {
+            return String(opt.value) === String(value);
+        });
+    }
+
+    function getFiltersSnapshot() {
+        return {
+            cia: (selCia && selCia.value || '').trim(),
+            fechaIni: (inpIni && inpIni.value || '').trim(),
+            fechaFin: (inpFin && inpFin.value || '').trim(),
+        };
+    }
+
+    function saveProcState() {
+        saveState({
+            filters: getFiltersSnapshot(),
+            rows: lastLoadedRows,
+            selected: getSelectedPersons(),
+        });
+    }
+
+    function clearListBecauseFiltersChanged() {
+        lastLoadedRows = [];
+        body.innerHTML = '';
+        setPersonasCount(0);
+        btnProcesar.classList.add('d-none');
+        checkAll.checked = false;
+        checkAll.indeterminate = false;
+        saveProcState();
+    }
 
     function setDefaultDates() {
         const hoy = new Date();
         const firstDay = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-        $('fechaIni').value = firstDay.toISOString().slice(0, 10);
-        $('fechaFin').value = hoy.toISOString().slice(0, 10);
+        inpIni.value = firstDay.toISOString().slice(0, 10);
+        inpFin.value = hoy.toISOString().slice(0, 10);
     }
 
     function resetProgress() {
@@ -131,59 +207,92 @@
         checkAll.indeterminate = selected > 0 && selected < checks.length;
     }
 
+    function renderPersonasRows(data, selectedSet) {
+        body.innerHTML = '';
+        const sel = selectedSet instanceof Set ? selectedSet : null;
+        data.forEach((p) => {
+            const person = p.Person == null ? '' : String(p.Person);
+            const name = p.Name == null ? '' : String(p.Name);
+            const horario = p.Horario == null || String(p.Horario).trim() === '' ? '' : String(p.Horario);
+            const entry = p.EntryDate == null ? '' : dateUi(p.EntryDate);
+            const cease = p.CeaseDate == null ? '' : dateUi(p.CeaseDate);
+            const ultima = p.ultimafecha == null ? '' : String(p.ultimafecha);
+            const checked = sel && sel.has(person) ? ' checked' : '';
+            const tr = document.createElement('tr');
+            tr.innerHTML = ''
+                + '<td class="text-center ps-3"><input type="checkbox" class="form-check-input chk-persona"' + checked + ' value="' + escapeHtml(person) + '"></td>'
+                + '<td class="text-center font-monospace">' + escapeHtml(person) + '</td>'
+                + '<td>' + escapeHtml(name) + '</td>'
+                + '<td>' + escapeHtml(horario || '-') + '</td>'
+                + '<td class="text-center">' + escapeHtml(entry || '-') + '</td>'
+                + '<td class="text-center">' + escapeHtml(cease || '-') + '</td>'
+                + '<td class="text-center">' + escapeHtml(ultima || 'Nunca') + '</td>';
+            body.appendChild(tr);
+        });
+        setPersonasCount(data.length);
+        if (!sel) {
+            checkAll.checked = false;
+            checkAll.indeterminate = false;
+        } else {
+            refreshSelectionState();
+        }
+        btnProcesar.classList.toggle('d-none', data.length === 0);
+    }
+
     async function cargarPersonas(keepProgress) {
-        const cia = ($('companySelector').value || '').trim();
+        const cia = (selCia.value || '').trim();
+        const fechaIni = (inpIni.value || '').trim();
+        const fechaFin = (inpFin.value || '').trim();
         if (!cia) {
             alert('Seleccione una compañía.');
+            return;
+        }
+        if (!fechaIni || !fechaFin) {
+            alert('Seleccione fecha inicio y fin.');
+            return;
+        }
+        if (fechaFin < fechaIni) {
+            alert('La fecha fin no puede ser anterior a la fecha inicio.');
             return;
         }
         btnBuscar.disabled = true;
         btnProcesar.classList.add('d-none');
         body.innerHTML = '';
-        $('totalTrabajadores').innerText = '0 trabajadores';
+        lastLoadedRows = [];
+        setPersonasCount(0);
         if (!keepProgress) {
             resetProgress();
         }
         try {
-            const res = await fetch('/api/asistencia/personas?cia=' + encodeURIComponent(cia));
+            const q = new URLSearchParams({
+                cia,
+                fechaIni,
+                fechaFin,
+            });
+            const res = await fetch('/api/asistencia/personas?' + q.toString());
             const json = await res.json();
             if (!res.ok || !json.success) {
                 alert(json.error || 'No se pudo cargar el personal.');
+                saveProcState();
                 return;
             }
             const data = Array.isArray(json.data) ? json.data : [];
-            data.forEach((p) => {
-                const person = p.Person == null ? '' : String(p.Person);
-                const name = p.Name == null ? '' : String(p.Name);
-                const entry = p.EntryDate == null ? '' : dateUi(p.EntryDate);
-                const cease = p.CeaseDate == null ? '' : dateUi(p.CeaseDate);
-                const ultima = p.ultimafecha == null ? '' : String(p.ultimafecha);
-                const tr = document.createElement('tr');
-                tr.innerHTML = ''
-                    + '<td class="text-center ps-3"><input type="checkbox" class="form-check-input chk-persona" value="' + escapeHtml(person) + '"></td>'
-                    + '<td class="text-start text-muted">' + escapeHtml(person) + '</td>'
-                    + '<td class="text-start fw-bold">' + escapeHtml(name) + '</td>'
-                    + '<td class="text-center text-muted small">' + escapeHtml(entry || '-') + '</td>'
-                    + '<td class="text-center text-muted small">' + escapeHtml(cease || '-') + '</td>'
-                    + '<td class="text-center text-muted small">' + escapeHtml(ultima || 'Nunca') + '</td>';
-                body.appendChild(tr);
-            });
-            $('totalTrabajadores').innerText = data.length === 1 ? '1 trabajador' : data.length + ' trabajadores';
-            checkAll.checked = false;
-            checkAll.indeterminate = false;
-            btnProcesar.classList.toggle('d-none', data.length === 0);
+            lastLoadedRows = data;
+            renderPersonasRows(data, null);
+            saveProcState();
         } catch (e) {
             console.error(e);
             alert('Error de red al cargar personal.');
+            saveProcState();
         } finally {
             btnBuscar.disabled = false;
         }
     }
 
     async function iniciarProcesamiento() {
-        const cia = ($('companySelector').value || '').trim();
-        const fechaIni = ($('fechaIni').value || '').trim();
-        const fechaFin = ($('fechaFin').value || '').trim();
+        const cia = (selCia.value || '').trim();
+        const fechaIni = (inpIni.value || '').trim();
+        const fechaFin = (inpFin.value || '').trim();
         const seleccionados = getSelectedPersons();
 
         if (!fechaIni || !fechaFin) {
@@ -202,9 +311,9 @@
         $('progresoContainer').classList.remove('d-none');
         btnProcesar.disabled = true;
         btnBuscar.disabled = true;
-        $('companySelector').disabled = true;
-        $('fechaIni').disabled = true;
-        $('fechaFin').disabled = true;
+        selCia.disabled = true;
+        inpIni.disabled = true;
+        inpFin.disabled = true;
 
         const total = seleccionados.length;
         let procesados = 0;
@@ -238,25 +347,28 @@
 
         btnProcesar.disabled = false;
         btnBuscar.disabled = false;
-        $('companySelector').disabled = false;
-        $('fechaIni').disabled = false;
-        $('fechaFin').disabled = false;
+        selCia.disabled = false;
+        inpIni.disabled = false;
+        inpFin.disabled = false;
         $('progresoDetalle').innerText = errores > 0
             ? ('Completado. Errores: ' + errores + '. Refrescando lista...')
             : 'Completado. Refrescando lista...';
         await cargarPersonas(true);
         resetProgress();
         refreshSelectionState();
+        saveProcState();
     }
 
     checkAll.addEventListener('change', function () {
         document.querySelectorAll('.chk-persona').forEach((chk) => { chk.checked = checkAll.checked; });
         refreshSelectionState();
+        saveProcState();
     });
 
     body.addEventListener('change', function (e) {
         if (e.target && e.target.classList.contains('chk-persona')) {
             refreshSelectionState();
+            saveProcState();
         }
     });
 
@@ -264,12 +376,43 @@
         e.preventDefault();
         cargarPersonas();
     });
+
     btnProcesar.addEventListener('click', iniciarProcesamiento);
 
-    setDefaultDates();
-    if (($('companySelector').value || '').trim()) {
-        cargarPersonas();
-    }
+    selCia.addEventListener('change', clearListBecauseFiltersChanged);
+    inpIni.addEventListener('change', clearListBecauseFiltersChanged);
+    inpFin.addEventListener('change', clearListBecauseFiltersChanged);
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const saved = loadState();
+        if (saved && saved.filters) {
+            const f = saved.filters;
+            if (f.cia && optionExists(selCia, f.cia)) {
+                selCia.value = String(f.cia);
+            }
+            if (f.fechaIni) inpIni.value = String(f.fechaIni);
+            if (f.fechaFin) inpFin.value = String(f.fechaFin);
+            if (Array.isArray(saved.rows) && saved.rows.length > 0) {
+                const selArr = Array.isArray(saved.selected) ? saved.selected : [];
+                const selSet = new Set(selArr.map(String));
+                lastLoadedRows = saved.rows;
+                renderPersonasRows(saved.rows, selSet);
+                saveProcState();
+            } else {
+                if (!inpIni.value || !inpFin.value) {
+                    setDefaultDates();
+                }
+                if ((selCia.value || '').trim()) {
+                    cargarPersonas();
+                }
+            }
+        } else {
+            setDefaultDates();
+            if ((selCia.value || '').trim()) {
+                cargarPersonas();
+            }
+        }
+    });
 })();
 </script>
 {% endblock %}
