@@ -1,8 +1,12 @@
-import os
-import sys
+import html
 import logging
-from datetime import date, datetime, time
+import os
+import smtplib
+import sys
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
@@ -26,6 +30,9 @@ from database import (
     get_tipos_justificacion,
     guardar_tipo_justificacion,
     eliminar_tipo_justificacion,
+    get_lista_envio_alertas,
+    actualizar_recibe_alertas,
+    get_destinatarios_prueba_alertas_email,
 )
 
 load_dotenv()
@@ -678,6 +685,152 @@ def api_guardar_feriado():
 def api_eliminar_feriado(id_feriado):
     success = eliminar_feriado(id_feriado)
     return jsonify({"success": success})
+
+
+@app.route('/configurar-alertas')
+@login_required
+def configurar_alertas():
+    ensure_user_session()
+    companies = get_companias_selector()
+    default_company = session.get('company') or ''
+    if companies and default_company:
+        ids = {str(c.get('id', '')).strip() for c in companies}
+        if str(default_company).strip() not in ids and companies:
+            default_company = companies[0].get('id', '')
+    return render_template(
+        'configurar_alertas.html',
+        companies=companies,
+        default_company=default_company,
+    )
+
+
+@app.route('/api/alertas/lista', methods=['GET'])
+@login_required
+def api_lista_alertas():
+    cia = (request.args.get('cia') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    try:
+        rows = get_lista_envio_alertas(cia)
+        data = [
+            {
+                "person": _jsonable_value(r.get("person")),
+                "name": _jsonable_value(r.get("name")),
+                "email": _jsonable_value(r.get("email")),
+                "recibe_alertas": bool(r.get("recibe_alertas")),
+            }
+            for r in (rows or [])
+        ]
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        logging.exception("api_lista_alertas")
+        return jsonify({"success": False, "error": str(e), "data": []}), 500
+
+
+@app.route('/api/alertas/recibe', methods=['POST'])
+@login_required
+def api_actualizar_recibe_alerta():
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    person = (body.get('person') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not person:
+        return jsonify({"success": False, "error": "Indique el trabajador."}), 400
+    raw_recibe = body.get('recibe_alertas')
+    if isinstance(raw_recibe, str):
+        recibe = raw_recibe.strip().lower() in ('1', 'true', 'yes', 'on', 'si', 'sí')
+    else:
+        recibe = bool(raw_recibe)
+
+    usuario = str(
+        getattr(current_user, 'username', '')
+        or getattr(current_user, 'id', '')
+        or ''
+    )[:20]
+
+    ok, err = actualizar_recibe_alertas(cia, person, recibe, usuario)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": err or 'No se pudo actualizar.'}), 400
+
+
+@app.route('/api/alertas/enviar_prueba', methods=['POST'])
+@login_required
+def api_enviar_prueba_alerta():
+    """
+    Envía un correo de demostración a todos los habilitados con e-mail (SMTP).
+    Variables de entorno: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
+    SMTP_FROM (opcional, por defecto SMTP_USER), SMTP_FROM_NAME (opcional).
+    """
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+
+    smtp_host = (os.getenv('SMTP_HOST') or 'smtp.gmail.com').strip()
+    smtp_port = int((os.getenv('SMTP_PORT') or '587').strip() or '587')
+    smtp_user = (os.getenv('SMTP_USER') or '').strip()
+    smtp_pass = (os.getenv('SMTP_PASSWORD') or '').strip()
+    from_addr = (os.getenv('SMTP_FROM') or smtp_user).strip()
+    from_name = (os.getenv('SMTP_FROM_NAME') or 'Sistema de Asistencia').strip()
+
+    if not smtp_user or not smtp_pass:
+        return jsonify({
+            "success": False,
+            "error": "Configure SMTP_USER y SMTP_PASSWORD en el entorno (.env) para enviar correos de prueba.",
+        }), 400
+
+    destinatarios = get_destinatarios_prueba_alertas_email(cia)
+    if not destinatarios:
+        return jsonify({
+            "success": False,
+            "error": "No hay destinatarios habilitados con correo electrónico.",
+        }), 400
+
+    fecha_ayer = (datetime.now() - timedelta(days=1)).strftime('%d/%m/%Y')
+    server = None
+    try:
+        server = smtplib.SMTP(smtp_host, smtp_port, timeout=45)
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        enviados = 0
+        for nombre, email in destinatarios:
+            safe_nombre = html.escape(str(nombre or ''))
+            msg = MIMEMultipart()
+            msg['From'] = f'{from_name} <{from_addr}>'
+            msg['To'] = email
+            msg['Subject'] = f'Recordatorio: marcación incompleta - {fecha_ayer}'
+            cuerpo = f"""<html>
+<body style="font-family: sans-serif; color: #334155;">
+    <h2 style="color: #e11d48;">Hola, {safe_nombre}</h2>
+    <p>Este es un recordatorio automático de que el día de ayer <b>({fecha_ayer})</b>
+    no registró sus marcaciones completas.</p>
+    <p>Por favor, recuerde marcar los cuatro tiempos (entrada, salida a almuerzo, regreso de almuerzo y salida)
+    para evitar descuentos o faltas injustificadas.</p>
+    <hr style="border: none; border-top: 1px solid #eee;">
+    <small style="color: #64748b;">Correo de prueba generado desde el sistema de gestión de asistencia.</small>
+</body>
+</html>"""
+            msg.attach(MIMEText(cuerpo, 'html', 'utf-8'))
+            server.send_message(msg)
+            enviados += 1
+        return jsonify({
+            "success": True,
+            "mensaje": f"Se enviaron {enviados} correo(s) de prueba.",
+        })
+    except Exception as e:
+        logging.exception("api_enviar_prueba_alerta")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if server is not None:
+            try:
+                server.quit()
+            except Exception:
+                try:
+                    server.close()
+                except Exception:
+                    pass
 
 
 @app.route('/api/horarios/guardar', methods=['POST'])

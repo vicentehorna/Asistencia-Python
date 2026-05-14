@@ -129,6 +129,11 @@
                         <i class="bi bi-calendar-event"></i> Feriados
                     </a>
                 </li>
+                <li class="{{ 'active' if request.endpoint == 'configurar_alertas' else '' }}">
+                    <a href="{{ url_for('configurar_alertas') }}">
+                        <i class="bi bi-bell"></i> Configurar Alertas
+                    </a>
+                </li>
 
                 <!-- PROCESOS -->
                 <li class="py-0">

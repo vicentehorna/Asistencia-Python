@@ -621,6 +621,122 @@ def eliminar_tipo_justificacion(id_justificacion):
         return False
 
 
+def get_lista_envio_alertas(company):
+    """
+    Lista trabajadores con configuración de alertas (sp_pr_listaenvioalertas_web).
+    Retorna filas {person, name, email, recibe_alertas}.
+    """
+    cia = (company or '').strip()[:4]
+    if not cia:
+        return []
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("EXEC [dbo].[sp_pr_listaenvioalertas_web] @cia=?", (cia,))
+        cols = [c[0] for c in cursor.description]
+        out = []
+        for row in cursor.fetchall():
+            d = dict(zip(cols, row))
+            lk = {str(k).lower(): v for k, v in d.items()}
+            ra = lk.get('recibealertas')
+            if isinstance(ra, bytes):
+                ra = bool(ra[0]) if ra else False
+            else:
+                ra = bool(ra) if ra is not None else True
+            out.append(
+                {
+                    'person': str(lk.get('person') or '').strip(),
+                    'name': (lk.get('name') or '') or '',
+                    'email': (lk.get('email') or lk.get('e_mail') or '') or '',
+                    'recibe_alertas': ra,
+                }
+            )
+        cursor.close()
+        conn.close()
+        return out
+    except Exception as e:
+        print(f"Error en get_lista_envio_alertas: {e}")
+        return []
+
+
+def actualizar_recibe_alertas(company, person, recibe_alertas, usuario):
+    """
+    Actualiza RecibeAlertas en CA_ConfiguracionAlertas.
+    Retorna (True, None) o (False, mensaje).
+    """
+    cia = (company or '').strip()[:4]
+    pers = (person or '').strip()[:20]
+    user = (str(usuario) if usuario is not None else '')[:20]
+    if not cia or not pers:
+        return False, 'Compañía y trabajador son obligatorios.'
+    bit_val = 1 if recibe_alertas else 0
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE CA_ConfiguracionAlertas
+            SET RecibeAlertas = ?, XLastUser = ?, XLastDate = GETDATE()
+            WHERE Company = ? AND Person = ?
+            """,
+            (bit_val, user, cia, pers),
+        )
+        if cursor.rowcount == 0:
+            cursor.close()
+            conn.close()
+            return False, 'No se encontró configuración de alertas para ese trabajador en la compañía indicada.'
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, None
+    except Exception as e:
+        print(f"Error en actualizar_recibe_alertas: {e}")
+        return False, str(e)
+
+
+def get_destinatarios_prueba_alertas_email(company):
+    """
+    Colaboradores con RecibeAlertas = 1 y correo en SY_Person (envío de prueba SMTP).
+    Retorna lista de tuplas (nombre, email) sin duplicar direcciones (minúsculas).
+    """
+    cia = (company or '').strip()[:4]
+    if not cia:
+        return []
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT p.Name, p.EMail
+            FROM CA_ConfiguracionAlertas ca
+            INNER JOIN SY_Person p ON ca.Person = p.Person
+            WHERE ca.Company = ?
+              AND ca.RecibeAlertas = 1
+              AND p.EMail IS NOT NULL
+              AND LTRIM(RTRIM(p.EMail)) <> ''
+            """,
+            (cia,),
+        )
+        seen = set()
+        out = []
+        for row in cursor.fetchall():
+            name = row[0]
+            email = (str(row[1]).strip() if row[1] is not None else '')
+            if not email:
+                continue
+            key = email.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((name, email))
+        cursor.close()
+        conn.close()
+        return out
+    except Exception as e:
+        print(f"Error en get_destinatarios_prueba_alertas_email: {e}")
+        return []
+
+
 DIAS_HORARIO_ORDEN = [
     'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Domingo',
 ]
