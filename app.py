@@ -27,6 +27,7 @@ from database import (
     get_horario_detalle_api,
     get_listado_marcas,
     insert_registro_asistencia_manual,
+    inactivar_registro_asistencia,
     get_tipos_justificacion,
     guardar_tipo_justificacion,
     eliminar_tipo_justificacion,
@@ -935,6 +936,36 @@ def api_marca_manual():
     if ok:
         return jsonify({"success": True})
     return jsonify({"success": False, "error": err or "No se pudo guardar la marca manual."}), 500
+
+
+@app.route("/api/marcas/inactivar", methods=["POST"])
+@login_required
+def api_inactivar_marca():
+    """Marca un registro como inactivo (estado = I); deja de mostrarse en Gestión de Marcas."""
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = (body.get("cia") or "").strip()
+    id_registro = body.get("idRegistro") if body.get("idRegistro") is not None else body.get("id")
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    try:
+        id_registro = int(id_registro)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Registro no válido."}), 400
+    if id_registro <= 0:
+        return jsonify({"success": False, "error": "Registro no válido."}), 400
+
+    usuario = str(
+        getattr(current_user, "username", None)
+        or getattr(current_user, "id", None)
+        or ""
+    )[:20]
+
+    ok, err = inactivar_registro_asistencia(cia, id_registro, usuario)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": err or "No se pudo inactivar la marca."}), 400
 
 
 @app.route('/api/asistencia/personas')

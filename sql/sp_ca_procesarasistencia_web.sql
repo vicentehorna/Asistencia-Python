@@ -5,6 +5,8 @@
 
   Tablas: ResumenAsistencia, AsignacionHorarios, Horarios, SY_Holiday, RegistroAsistencia,
           PR_VacationDetail, CA_JustificacionPersona, CA_TipoJustificacion, SY_Person
+
+  RegistroAsistencia: solo marcas con estado = 'A' (activas). Las inactivas (I) se ignoran.
 */
 SET ANSI_NULLS ON;
 GO
@@ -138,6 +140,7 @@ BEGIN
         FROM RegistroAsistencia
         WHERE Person = @person
           AND Company = @cia
+          AND estado = 'A'
           AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
           AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso));
 
@@ -228,6 +231,7 @@ BEGIN
             FROM RegistroAsistencia
             WHERE Person = @person
               AND Company = @cia
+              AND estado = 'A'
               AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
               AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso));
 
@@ -241,6 +245,7 @@ BEGIN
                 FROM RegistroAsistencia
                 WHERE Person = @person
                   AND Company = @cia
+                  AND estado = 'A'
                   AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
                   AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso))
             )

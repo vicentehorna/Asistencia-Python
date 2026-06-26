@@ -6,7 +6,8 @@ Un archivo `.sql` por cada SP referenciado en `app.py` / `database.py`.
 
 | Script | Descripción |
 |--------|-------------|
-| `tables/RegistroAsistencia.sql` | Marcaciones (manual y biométrico); FK a `Trabajadores` |
+| `tables/RegistroAsistencia.sql` | Marcaciones; columna `estado` (A/I), FK a `Trabajadores` |
+| `migrations/20260325_RegistroAsistencia_estado.sql` | ALTER para agregar `estado` en BD existente |
 
 ## Procedimientos
 

@@ -64,6 +64,7 @@
                             <th>Hora</th>
                             <th class="text-start">Cargo</th>
                             <th>Evidencia</th>
+                            <th style="width: 72px;">Acción</th>
                         </tr>
                     </thead>
                     <tbody id="tablaMarcasBody" class="text-center"></tbody>
@@ -413,6 +414,7 @@ function renderMarcasRows(rows, filters) {
 
     const exportRows = [];
     dataRows.forEach(function (row) {
+        const idRegistro = pickRow(row, ['IdRegistro', 'idregistro']);
         const dni = pickRow(row, ['DNI', 'dni']);
         const nombre = pickRow(row, ['Nombre', 'nombre']);
         const diaSem = pickRow(row, ['diasemana', 'DiaSemana']);
@@ -452,6 +454,20 @@ function renderMarcasRows(rows, filters) {
             evidenciaHtml = '<i class="bi bi-image text-muted opacity-25 fs-6" title="Sin foto"></i>';
         }
 
+        let accionHtml = '';
+        if (idRegistro) {
+            const nomAttr = escapeHtml(String(nombre || ''));
+            const dniAttr = escapeHtml(String(dni || ''));
+            const fechaAttr = escapeHtml(String(fechaStr || ''));
+            const horaAttr = escapeHtml(String(horaDisplay || ''));
+            accionHtml = '<button type="button" class="btn btn-link btn-sm text-danger p-0 btn-inactivar-marca" ' +
+                'data-id="' + escapeHtml(String(idRegistro)) + '" ' +
+                'data-nombre="' + nomAttr + '" data-dni="' + dniAttr + '" ' +
+                'data-fecha="' + fechaAttr + '" data-hora="' + horaAttr + '" ' +
+                'title="Inactivar esta marca">' +
+                '<i class="bi bi-x-circle-fill fs-6"></i></button>';
+        }
+
         const tr = document.createElement('tr');
         tr.innerHTML =
             '<td class="text-start ps-3 text-muted">' + escapeHtml(dni) + '</td>' +
@@ -460,11 +476,24 @@ function renderMarcasRows(rows, filters) {
             '<td>' + escapeHtml(fechaStr) + '</td>' +
             '<td class="fw-bold">' + escapeHtml(horaDisplay) + '</td>' +
             '<td class="text-start text-muted" style="font-size: 0.75rem;">' + escapeHtml(cargo) + '</td>' +
-            '<td>' + evidenciaHtml + '</td>';
+            '<td>' + evidenciaHtml + '</td>' +
+            '<td class="text-center">' + accionHtml + '</td>';
         const btn = tr.querySelector('button[data-ruta]');
         if (btn) {
             btn.addEventListener('click', function () {
                 verEvidencia(this.getAttribute('data-ruta'), this.getAttribute('data-nombre'));
+            });
+        }
+        const btnInactivar = tr.querySelector('.btn-inactivar-marca');
+        if (btnInactivar) {
+            btnInactivar.addEventListener('click', function () {
+                inactivarMarca({
+                    id: this.getAttribute('data-id'),
+                    nombre: this.getAttribute('data-nombre'),
+                    dni: this.getAttribute('data-dni'),
+                    fecha: this.getAttribute('data-fecha'),
+                    hora: this.getAttribute('data-hora')
+                }, tr);
             });
         }
         tbody.appendChild(tr);
@@ -546,6 +575,51 @@ document.getElementById('btnExportMarcasExcel').addEventListener('click', async 
         alert('No se pudo generar el archivo Excel.');
     }
 });
+
+async function inactivarMarca(info, tr) {
+    const cia = document.getElementById('cia').value;
+    const idRegistro = info && info.id;
+    if (!idRegistro || !cia) return;
+
+    const detalle = [
+        info.nombre ? String(info.nombre) : '',
+        info.dni ? 'DNI ' + String(info.dni) : '',
+        info.fecha ? String(info.fecha) : '',
+        info.hora ? String(info.hora) : ''
+    ].filter(Boolean).join(' · ');
+
+    const msg = detalle
+        ? 'La siguiente marca se inactivará y dejará de mostrarse en el listado:\n\n' +
+          detalle + '\n\n¿Desea confirmar la inactivación?'
+        : 'Esta marca se inactivará (estado = I) y dejará de mostrarse.\n\n¿Desea confirmar?';
+
+    if (!window.confirm(msg)) return;
+
+    try {
+        const res = await fetch('/api/marcas/inactivar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cia: cia, idRegistro: idRegistro })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            alert(data.error || 'No se pudo inactivar la marca.');
+            return;
+        }
+        if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+        const tbody = document.getElementById('tablaMarcasBody');
+        const remaining = tbody ? tbody.querySelectorAll('tr').length : 0;
+        setRowCountMarcas(remaining);
+        if (!remaining) {
+            lastMarcasExcelPayload = null;
+            const btnExport = document.getElementById('btnExportMarcasExcel');
+            if (btnExport) btnExport.disabled = true;
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Error de red al inactivar la marca.');
+    }
+}
 
 function verEvidencia(rutaFoto, nombre) {
     document.getElementById('modalEvidenciaTitulo').innerText = 'Evidencia: ' + (nombre || '');

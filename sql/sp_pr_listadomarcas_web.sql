@@ -18,6 +18,7 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT
+        R.IdRegistro,
         P.Person AS DNI,
         P.Name AS Nombre,
         /* Lunes=1 … Domingo=7, independiente de @@DATEFIRST del servidor */
@@ -46,6 +47,7 @@ BEGIN
           BETWEEN CONVERT(VARCHAR(8), @Fechainicio, 112)
               AND CONVERT(VARCHAR(8), @FechaFin, 112)
       AND (@person = '0' OR R.Person = @person)
+      AND R.estado = 'A'
     ORDER BY P.Name, R.FechaHoraIngreso;
 END;
 GO

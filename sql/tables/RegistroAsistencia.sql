@@ -18,6 +18,7 @@ CREATE TABLE [dbo].[RegistroAsistencia] (
     [xlastdate]        DATETIME NULL,
     [flagmanual]       CHAR(1) NOT NULL,
     [MotivoManual]     VARCHAR(255) NULL,
+    [estado]           CHAR(1) NOT NULL,
     CONSTRAINT [PK_RegistroAsistencia] PRIMARY KEY CLUSTERED ([IdRegistro] ASC)
         WITH (
             PAD_INDEX = OFF,
@@ -37,6 +38,11 @@ GO
 ALTER TABLE [dbo].[RegistroAsistencia]
     ADD CONSTRAINT [DF_RegistroAsistencia_flagmanual]
     DEFAULT ('N') FOR [flagmanual];
+GO
+
+ALTER TABLE [dbo].[RegistroAsistencia]
+    ADD CONSTRAINT [DF_RegistroAsistencia_estado]
+    DEFAULT ('A') FOR [estado];
 GO
 
 ALTER TABLE [dbo].[RegistroAsistencia] WITH CHECK
