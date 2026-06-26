@@ -20,7 +20,8 @@ BEGIN
     SELECT
         P.Person AS DNI,
         P.Name AS Nombre,
-        CASE DATEPART(WEEKDAY, CONVERT(DATETIME, R.FechaHoraIngreso))
+        /* Lunes=1 … Domingo=7, independiente de @@DATEFIRST del servidor */
+        CASE ((DATEPART(WEEKDAY, CONVERT(DATE, R.FechaHoraIngreso)) + @@DATEFIRST - 2) % 7) + 1
             WHEN 1 THEN 'LU'
             WHEN 2 THEN 'MA'
             WHEN 3 THEN 'MI'
