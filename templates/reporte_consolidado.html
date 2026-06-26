@@ -4,31 +4,62 @@
 
 {% block extra_css %}
 <style>
-    #cardResultado .table-consolidado-asistencia {
-        table-layout: fixed;
-        width: 100%;
-        font-size: 0.8rem;
+    .table-scroll-container {
+        max-height: 65vh;
+        overflow: auto;
+        border: 1px solid #dee2e6;
     }
-    #cardResultado .table-consolidado-asistencia th,
-    #cardResultado .table-consolidado-asistencia td {
-        padding: 0.35rem 0.5rem;
+
+    .table-planilla-vertical {
+        --sticky-col1-w: 5.75rem;
+        font-size: 11px;
+        white-space: nowrap;
+        margin-bottom: 0;
+    }
+
+    .table-planilla-vertical th,
+    .table-planilla-vertical td {
+        padding: 0.2rem 0.4rem;
         vertical-align: middle;
-        word-break: break-word;
-        white-space: normal;
-        line-height: 1.25;
     }
-    #cardResultado .table-consolidado-asistencia .col-num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
+
+    .table-planilla-vertical thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f8f9fa;
+        z-index: 2;
+        box-shadow: 0 1px 0 #dee2e6;
+        font-weight: 600;
     }
-    #cardResultado .table-consolidado-asistencia .col-center {
-        text-align: center;
+
+    .table-planilla-vertical .sticky-col-1 {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        background-color: #fff;
+        min-width: var(--sticky-col1-w);
+        width: var(--sticky-col1-w);
+        max-width: var(--sticky-col1-w);
+        box-sizing: border-box;
     }
-    #cardResultado .table-consolidado-asistencia .col-mono {
-        font-family: ui-monospace, monospace;
-        font-size: 0.75rem;
+
+    .table-planilla-vertical .sticky-col-2 {
+        position: sticky;
+        left: var(--sticky-col1-w);
+        z-index: 1;
+        background-color: #fff;
+        min-width: 13rem;
+        max-width: 14rem;
+        box-sizing: border-box;
     }
-    #tbody-consolidado-asistencia tr.fila-con-falta td {
+
+    .table-planilla-vertical thead th.sticky-col-1,
+    .table-planilla-vertical thead th.sticky-col-2 {
+        z-index: 3;
+        background-color: #f8f9fa;
+    }
+
+    .table-planilla-vertical tbody tr.fila-falta td {
         background-color: #fff3cd;
     }
 </style>
@@ -36,10 +67,7 @@
 
 {% block content %}
 <div class="card shadow-sm border-0 mb-4">
-    <div class="card-header bg-white border-bottom-0 pt-4 pb-0">
-        <h5 class="mb-0 fw-bold text-secondary"><i class="bi bi-funnel"></i> Filtros del Reporte</h5>
-    </div>
-    <div class="card-body">
+    <div class="card-body pt-3">
         <form id="frmConsolidadoAsistencia" class="row g-3">
             <div class="col-md-4">
                 <label for="cboCompania" class="form-label small fw-bold text-muted">Compañía</label>
@@ -70,7 +98,9 @@
                     <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcel" disabled>
                         <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
                     </button>
-                    <span class="ms-auto small text-muted fw-bold" id="lblRowCount">0 registros</span>
+                    <span class="ms-auto text-muted small fw-bold">
+                        No. de registros: <span id="lblRowCount">0</span>
+                    </span>
                 </div>
             </div>
         </form>
@@ -79,24 +109,16 @@
 
 <div class="card shadow-sm border-0 d-none" id="cardResultado">
     <div class="card-body">
-        <h4 class="text-center fw-bold mb-4">CONSOLIDADO DE ASISTENCIA</h4>
-
-        <div class="table-responsive border rounded overflow-hidden">
-            <table class="table table-sm table-hover table-bordered border align-middle mb-0 table-consolidado-asistencia">
-                <colgroup>
-                    <col style="width: 12%;">
-                    <col style="width: 38%;">
-                    <col style="width: 16%;">
-                    <col style="width: 12%;">
-                    <col style="width: 22%;">
-                </colgroup>
-                <thead class="table-light">
-                    <tr class="text-center">
-                        <th>PERS.</th>
-                        <th>NOMBRE</th>
-                        <th>TARDANZA (HH:MM)</th>
-                        <th>FALTAS</th>
-                        <th>ADIC. (HH:MM)</th>
+        <h4 class="text-center fw-bold mb-3">Consolidado de asistencia</h4>
+        <div class="table-scroll-container">
+            <table class="table table-bordered table-sm table-hover table-planilla-vertical align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="sticky-col-1 text-center">Persona</th>
+                        <th class="sticky-col-2">Nombre</th>
+                        <th class="text-end">Tardanza (HH:MM)</th>
+                        <th class="text-end">Faltas</th>
+                        <th class="text-end">Adic. (HH:MM)</th>
                     </tr>
                 </thead>
                 <tbody id="tbody-consolidado-asistencia"></tbody>
@@ -125,7 +147,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     function setRowCount(n) {
         const num = Math.max(0, parseInt(n, 10) || 0);
         if (!lblRowCount) return;
-        lblRowCount.textContent = num === 1 ? '1 registro' : num + ' registros';
+        lblRowCount.textContent = String(num);
     }
 
     function saveState(state) {
@@ -227,14 +249,14 @@ document.addEventListener('DOMContentLoaded', async function () {
             const tr = document.createElement('tr');
             const faltasN = parseInt(pickFaltas(row), 10);
             if (!isNaN(faltasN) && faltasN > 0) {
-                tr.classList.add('fila-con-falta');
+                tr.classList.add('fila-falta');
             }
             tr.innerHTML = `
-                <td class="col-center col-mono">${escapeHtml(pickPerson(row))}</td>
-                <td>${escapeHtml(pickName(row))}</td>
-                <td class="col-num">${escapeHtml(formatMinutesHHMM(pickTardanza(row)))}</td>
-                <td class="col-num">${escapeHtml(pickFaltas(row))}</td>
-                <td class="col-num">${escapeHtml(formatMinutesHHMM(pickAdicional(row)))}</td>
+                <td class="sticky-col-1 font-monospace fw-bold text-center">${escapeHtml(pickPerson(row))}</td>
+                <td class="sticky-col-2 text-truncate">${escapeHtml(pickName(row))}</td>
+                <td class="text-end">${escapeHtml(formatMinutesHHMM(pickTardanza(row)))}</td>
+                <td class="text-end">${escapeHtml(pickFaltas(row))}</td>
+                <td class="text-end">${escapeHtml(formatMinutesHHMM(pickAdicional(row)))}</td>
             `;
             tbody.appendChild(tr);
         });

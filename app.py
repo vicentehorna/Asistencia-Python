@@ -34,6 +34,8 @@ from database import (
     get_lista_envio_alertas,
     actualizar_recibe_alertas,
     get_destinatarios_prueba_alertas_email,
+    get_validaciones_marcas_sin_horario,
+    get_validaciones_marcas_impares,
 )
 
 load_dotenv()
@@ -457,6 +459,61 @@ def api_guardar_asignacion():
         return jsonify({"success": True})
     except Exception as e:
         logging.exception("api_guardar_asignacion")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/asignaciones/actualizar', methods=['POST'])
+@login_required
+def api_actualizar_asignacion():
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    id_asignacion = body.get('id_asignacion')
+    fecha_ini = (body.get('fecha_ini') or '').strip()
+    fecha_fin = (body.get('fecha_fin') or '').strip()
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    try:
+        id_asignacion = int(id_asignacion)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Asignación no válida."}), 400
+    if id_asignacion <= 0:
+        return jsonify({"success": False, "error": "Asignación no válida."}), 400
+    if not fecha_ini:
+        return jsonify({"success": False, "error": "Indique fecha de inicio."}), 400
+    if fecha_fin and fecha_fin < fecha_ini:
+        return jsonify({"success": False, "error": "La fecha fin no puede ser menor que la fecha inicio."}), 400
+
+    usuario = str(
+        getattr(current_user, 'username', '')
+        or getattr(current_user, 'id', '')
+        or ''
+    )[:20]
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE AsignacionHorarios
+            SET FechaInicio = ?, FechaFin = ?, XLastUser = ?, XLastDate = GETDATE()
+            WHERE IdAsignacion = ? AND Company = ?
+            """,
+            (fecha_ini, (fecha_fin or None), usuario, id_asignacion, cia),
+        )
+        if cursor.rowcount == 0:
+            return jsonify({"success": False, "error": "Asignación no encontrada."}), 404
+        conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        logging.exception("api_actualizar_asignacion")
         return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if conn:
@@ -1035,10 +1092,13 @@ def api_personas_asistencia():
                     "ultimafecha": ultima_fmt,
                 }
             )
-        return jsonify({"success": True, "data": data})
+        validaciones = []
+        validaciones.extend(get_validaciones_marcas_sin_horario(cia, dt_ini, dt_fin))
+        validaciones.extend(get_validaciones_marcas_impares(cia, dt_ini, dt_fin))
+        return jsonify({"success": True, "data": data, "validaciones": validaciones})
     except Exception as e:
         logging.exception("api_personas_asistencia")
-        return jsonify({"success": False, "error": str(e), "data": []}), 500
+        return jsonify({"success": False, "error": str(e), "data": [], "validaciones": []}), 500
     finally:
         if conn:
             try:

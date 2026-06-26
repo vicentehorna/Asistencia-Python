@@ -2,153 +2,78 @@
 
 {% block title %}Configuración de Alertas Diarias{% endblock %}
 
-{% block content %}
-<div class="container-fluid py-4">
-    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
-        <div>
-            <h4 class="fw-bold mb-1" style="color: #1e293b;">
-                <i class="bi bi-envelope-paper-heart text-primary me-2" aria-hidden="true"></i>
-                <i class="bi bi-bell-fill text-warning me-2" aria-hidden="true"></i>Alertas de Marcación Incompleta
-            </h4>
-            <p class="text-muted small mb-0">Gestione qué colaboradores recibirán el recordatorio automático a las 8:00 AM.</p>
-        </div>
-        <div id="estadoGuardado" class="badge rounded-pill bg-light text-primary px-3 py-2 border shadow-sm align-self-center" style="display: none;" role="status" aria-live="polite">
-            <span id="estadoGuardadoSpinner" class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
-            <span id="estadoGuardadoText">Guardando…</span>
-        </div>
-    </div>
-
-    <div class="row g-3">
-        <div class="col-12">
-            <div class="card shadow-sm border-0 bg-white">
-                <div class="card-body p-3">
-                    <div class="toolbar-alertas d-flex flex-column flex-lg-row flex-lg-nowrap align-items-stretch align-items-lg-end gap-3">
-                        <div class="toolbar-alertas-cia flex-shrink-0">
-                            <label class="small fw-bold text-muted mb-1 d-block" for="companySelector">
-                                <i class="bi bi-building me-1" aria-hidden="true"></i>Compañía
-                            </label>
-                            <select id="companySelector" class="form-select form-select-sm border-secondary shadow-none fw-bold w-100">
-                                {% for c in companies %}
-                                <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.text }}</option>
-                                {% else %}
-                                <option value="">Sin compañías disponibles</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="toolbar-alertas-buscar flex-grow-1" style="min-width: 0;">
-                            <label class="small fw-bold text-muted mb-1 d-block" for="filtroNombre">
-                                <i class="bi bi-search me-1" aria-hidden="true"></i>Buscar colaborador
-                            </label>
-                            <input type="search" id="filtroNombre" class="form-control form-control-sm border-secondary shadow-none" placeholder="Nombre o DNI…" autocomplete="off" inputmode="search">
-                        </div>
-                        <div class="toolbar-alertas-acciones d-flex flex-nowrap align-items-center gap-2 gap-md-3 ms-lg-auto flex-shrink-0">
-                            <div class="text-center px-1">
-                                <div class="h5 mb-0 fw-bold text-success" id="countOn">0</div>
-                                <div class="small text-muted text-uppercase" style="font-size: 0.7rem;">Habilitados</div>
-                            </div>
-                            <div class="vr d-none d-sm-block text-muted opacity-50 align-self-stretch my-1"></div>
-                            <div class="text-center px-1">
-                                <div class="h5 mb-0 fw-bold text-secondary" id="countOff">0</div>
-                                <div class="small text-muted text-uppercase" style="font-size: 0.7rem;">Deshabilitados</div>
-                            </div>
-                            <span id="estadoCarga" class="small text-muted align-self-center flex-shrink-1" style="min-width: 0; max-width: 6.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
-                            <button type="button" id="btnEnviarPruebaCorreo" class="btn btn-outline-primary btn-sm shadow-sm fw-bold text-nowrap" title="Envía un correo de prueba a todos los habilitados con correo">
-                                <i class="bi bi-send-fill me-1" aria-hidden="true"></i>Enviar Correo
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-12">
-            <div class="card shadow-sm border-0">
-                <div class="card-body p-0">
-                    <div class="table-responsive" style="max-height: 75vh;">
-                        <table class="table table-sm table-hover table-compacta mb-0" id="tablaAlertas" style="font-size: 0.82rem;">
-                            <thead class="bg-light sticky-top">
-                                <tr class="border-bottom">
-                                    <th class="ps-3" style="width: 100px;">DNI</th>
-                                    <th>Nombre del colaborador</th>
-                                    <th>Correo</th>
-                                    <th class="text-center" style="width: 120px;">Alerta</th>
-                                </tr>
-                            </thead>
-                            <tbody id="listaCuerpo"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
+{% block extra_css %}
 <style>
-    /* Barra superior: compañía estrecha + misma fila que buscador, contadores y botón (≥992px) */
-    @media (min-width: 992px) {
-        .toolbar-alertas-cia {
-            width: 11rem;
-            max-width: 11rem;
-        }
-    }
-    @media (min-width: 992px) and (max-width: 1199.98px) {
-        .toolbar-alertas-buscar {
-            max-width: 16rem;
-        }
+    .table-scroll-container {
+        max-height: 65vh;
+        overflow: auto;
+        border: 1px solid #dee2e6;
     }
 
-    /* Máxima densidad en tabla de alertas */
-    #tablaAlertas.table-compacta tbody td {
-        padding-top: 0.25rem !important;
-        padding-bottom: 0.25rem !important;
+    .table-configurar-alertas {
+        font-size: 11px;
+        white-space: nowrap;
+        margin-bottom: 0;
+    }
+
+    .table-configurar-alertas th,
+    .table-configurar-alertas td {
+        padding: 0.25rem 0.5rem;
         vertical-align: middle;
-        line-height: 1.2;
     }
 
-    #tablaAlertas.table-compacta tbody td.col-correo {
-        max-width: 260px;
+    .table-configurar-alertas thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f8f9fa;
+        z-index: 2;
+        box-shadow: 0 1px 0 #dee2e6;
+        font-weight: 600;
     }
 
-    #tablaAlertas.table-compacta thead th {
-        padding-top: 0.4rem !important;
-        padding-bottom: 0.4rem !important;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.02em;
+    .table-configurar-alertas .col-codigo {
+        min-width: 6.5rem;
+        text-align: center;
     }
 
-    /* Switch compacto (solo esta tabla) */
-    #tablaAlertas .form-switch .form-check-input.check-recibe {
+    .table-configurar-alertas .col-nombre {
+        min-width: 14rem;
+    }
+
+    .table-configurar-alertas .col-correo {
+        min-width: 12rem;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .table-configurar-alertas .col-alerta {
+        width: 4.5rem;
+        text-align: center;
+    }
+
+    .table-configurar-alertas .form-switch .form-check-input.check-recibe {
         height: 1.2em;
         width: 2.2em;
-        margin-top: 0.15rem;
+        margin-top: 0;
         cursor: pointer;
     }
 
-    #tablaAlertas .form-check-input.check-recibe:checked {
+    .table-configurar-alertas .form-check-input.check-recibe:checked {
         background-color: #198754;
         border-color: #198754;
     }
 
-    #tablaAlertas .form-check-input.check-recibe:not(:checked) {
+    .table-configurar-alertas .form-check-input.check-recibe:not(:checked) {
         background-color: #e9ecef;
         border-color: #adb5bd;
     }
 
-    #tablaAlertas .form-check-input.check-recibe:focus {
+    .table-configurar-alertas .form-check-input.check-recibe:focus {
         box-shadow: 0 0 0 0.2rem rgba(25, 135, 84, 0.15);
     }
 
-    #tablaAlertas .form-check-input.check-recibe:not(:checked):focus {
+    .table-configurar-alertas .form-check-input.check-recibe:not(:checked):focus {
         box-shadow: 0 0 0 0.2rem rgba(173, 181, 189, 0.35);
-    }
-
-    #tablaAlertas.table-hover tbody tr:hover {
-        background-color: #f1f5f9 !important;
-    }
-
-    .sticky-top {
-        z-index: 10;
     }
 
     #estadoGuardado.is-success {
@@ -157,6 +82,70 @@
         border-color: #badbcc !important;
     }
 </style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body pt-3">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold text-muted" for="companySelector">Compañía</label>
+                    <select id="companySelector" class="form-select form-select-sm">
+                        {% for c in companies %}
+                        <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.text }}</option>
+                        {% else %}
+                        <option value="">Sin compañías disponibles</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label small fw-bold text-muted" for="filtroNombre">Buscar colaborador</label>
+                    <input type="search" id="filtroNombre" class="form-control form-control-sm" placeholder="Nombre o DNI…" autocomplete="off" inputmode="search">
+                </div>
+
+                <div class="col-12 border-top pt-3 mt-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <button type="button" id="btnEnviarPruebaCorreo" class="btn btn-primary btn-sm px-4" title="Envía un correo de prueba a todos los habilitados con correo">
+                            <i class="bi bi-send-fill me-1" aria-hidden="true"></i> Enviar correo
+                        </button>
+                        <div class="d-flex align-items-center gap-3 small text-muted">
+                            <span><span class="fw-bold text-success" id="countOn">0</span> habilitados</span>
+                            <span><span class="fw-bold text-secondary" id="countOff">0</span> deshabilitados</span>
+                        </div>
+                        <span id="estadoCarga" class="small text-muted"></span>
+                        <div id="estadoGuardado" class="badge rounded-pill bg-light text-primary px-3 py-2 border shadow-sm" style="display: none;" role="status" aria-live="polite">
+                            <span id="estadoGuardadoSpinner" class="spinner-border spinner-border-sm me-1 d-none" aria-hidden="true"></span>
+                            <span id="estadoGuardadoText">Guardando…</span>
+                        </div>
+                        <span class="ms-auto text-muted small fw-bold">
+                            No. de colaboradores: <span id="lblTotalColaboradores">0</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body pt-3">
+            <h4 class="text-center fw-bold mb-3">Alertas de Marcación Incompleta</h4>
+            <div class="table-scroll-container">
+                <table class="table table-bordered table-sm table-hover table-configurar-alertas align-middle mb-0" id="tablaAlertas">
+                    <thead>
+                        <tr>
+                            <th class="col-codigo">DNI</th>
+                            <th class="col-nombre">Nombre del colaborador</th>
+                            <th class="col-correo">Correo</th>
+                            <th class="col-alerta">Alerta</th>
+                        </tr>
+                    </thead>
+                    <tbody id="listaCuerpo"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -209,8 +198,10 @@
         });
         var elOn = document.getElementById('countOn');
         var elOff = document.getElementById('countOff');
+        var elTotal = document.getElementById('lblTotalColaboradores');
         if (elOn) elOn.textContent = String(activos);
         if (elOff) elOff.textContent = String(Math.max(0, total - activos));
+        if (elTotal) elTotal.textContent = String(total);
     }
 
     function filtrarTabla() {
@@ -229,24 +220,24 @@
         if (filtro) filtro.value = '';
         if (!tbody) return;
         if (!cia) {
-            tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="ps-3 py-3 text-muted">Seleccione una compañía.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="text-muted text-center py-3">Seleccione una compañía.</td></tr>';
             actualizarContadores();
             return;
         }
         setEstadoCarga('Cargando…');
-        tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="ps-3 py-3 text-muted">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="text-muted text-center py-3">Cargando…</td></tr>';
         fetch('/api/alertas/lista?cia=' + encodeURIComponent(cia))
             .then(function (r) { return r.json(); })
             .then(function (j) {
                 setEstadoCarga('');
                 if (!j.success) {
-                    tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="ps-3 py-3 text-danger">' + escapeHtml(j.error || 'Error al cargar.') + '</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="text-danger text-center py-3">' + escapeHtml(j.error || 'Error al cargar.') + '</td></tr>';
                     actualizarContadores();
                     return;
                 }
                 var rows = j.data || [];
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="ps-3 py-3 text-muted">No hay trabajadores con configuración de alertas para esta compañía.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="text-muted text-center py-3">No hay trabajadores con configuración de alertas para esta compañía.</td></tr>';
                     actualizarContadores();
                     return;
                 }
@@ -259,10 +250,10 @@
                     var checked = row.recibe_alertas ? ' checked' : '';
                     var searchBlob = (person + ' ' + name + ' ' + email).trim();
                     html += '<tr data-person="' + escapeHtml(person) + '" data-search="' + escapeHtml(searchBlob) + '">';
-                    html += '<td class="ps-3 fw-semibold text-secondary">' + escapeHtml(person) + '</td>';
-                    html += '<td>' + escapeHtml(name) + '</td>';
-                    html += '<td class="col-correo small text-break text-muted">' + escapeHtml(email) + '</td>';
-                    html += '<td class="text-center">';
+                    html += '<td class="col-codigo">' + escapeHtml(person) + '</td>';
+                    html += '<td class="col-nombre">' + escapeHtml(name) + '</td>';
+                    html += '<td class="col-correo text-muted">' + escapeHtml(email) + '</td>';
+                    html += '<td class="col-alerta">';
                     html += '<div class="form-check form-switch d-inline-flex justify-content-center m-0">';
                     html += '<input class="form-check-input check-recibe" type="checkbox" role="switch" id="' + id + '" data-person="' + escapeHtml(person) + '"' + checked + '>';
                     html += '</div></td></tr>';
@@ -278,7 +269,7 @@
             })
             .catch(function () {
                 setEstadoCarga('');
-                tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="ps-3 py-3 text-danger">Error de red al cargar la lista.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="' + COLS + '" class="text-danger text-center py-3">Error de red al cargar la lista.</td></tr>';
                 actualizarContadores();
             });
     }

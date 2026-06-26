@@ -34,8 +34,9 @@
                         </table>
                     </div>
                 </div>
-                <div class="card-footer bg-white py-2">
-                    <span class="small text-muted" id="countSelected">0 seleccionados</span>
+                <div class="card-footer bg-white py-2 d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <span class="small text-muted" id="countSelected">0 marcado(s) para asignación masiva</span>
+                    <span class="small text-primary" id="personaActivaLabel"></span>
                 </div>
             </div>
         </div>
@@ -67,7 +68,7 @@
             </div>
 
             <div class="card shadow-sm border-0">
-                <div class="card-header bg-white py-2 fw-bold small text-muted">Últimas Asignaciones Realizadas</div>
+                <div class="card-header bg-white py-2 fw-bold small text-muted" id="historialTitulo">Horarios asignados</div>
                 <div class="table-responsive" style="max-height: 250px;">
                     <table class="table table-sm table-hover mb-0" style="font-size: 0.8rem;">
                         <thead class="bg-light">
@@ -85,13 +86,67 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="modalEditarAsignacion" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="formEditarAsignacion" class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title">Editar rango de asignación</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editIdAsignacion">
+                <p class="small text-muted mb-3">
+                    Horario: <span class="fw-bold text-dark" id="editHorarioNombre"></span>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="small fw-bold mb-1" for="editFechaIni">Fecha Inicio</label>
+                        <input type="date" id="editFechaIni" class="form-control form-control-sm border-secondary shadow-none" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="small fw-bold mb-1" for="editFechaFin">Fecha Fin</label>
+                        <input type="date" id="editFechaFin" class="form-control form-control-sm border-secondary shadow-none">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-primary btn-sm px-4" id="btnGuardarEdicion">
+                    <i class="bi bi-save"></i> Guardar cambios
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    #listaPersonasBody .persona-row {
+        cursor: pointer;
+    }
+    #listaPersonasBody .persona-row.persona-row-active {
+        --bs-table-bg: rgba(13, 110, 253, 0.12);
+        --bs-table-hover-bg: rgba(13, 110, 253, 0.16);
+    }
+    #listaPersonasBody .persona-row:focus {
+        outline: none;
+    }
+    #listaPersonasBody .persona-row.persona-row-active td {
+        border-top-color: rgba(13, 110, 253, 0.25);
+        border-bottom-color: rgba(13, 110, 253, 0.25);
+    }
+</style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function () {
     const $ = (id) => document.getElementById(id);
+    const modalEditar = new bootstrap.Modal($('modalEditarAsignacion'));
     let historial = [];
+    let personaActiva = null;
 
     function txt(v) { return v == null ? '' : String(v); }
     function esc(s) {
@@ -104,10 +159,57 @@
         if (!isNaN(d.getTime())) return d.toLocaleDateString('es-PE');
         return s.slice(0, 10);
     }
+    function dateOnly(v) {
+        const s = txt(v).trim();
+        if (!s) return '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+        return s.slice(0, 10);
+    }
+
+    function getFilasPersonas() {
+        return Array.from(document.querySelectorAll('#listaPersonasBody .persona-row'));
+    }
+
+    function actualizarEncabezadoHistorial() {
+        const fila = personaActiva
+            ? document.querySelector('#listaPersonasBody .persona-row[data-person="' + CSS.escape(personaActiva) + '"]')
+            : null;
+        const nombre = fila ? txt(fila.dataset.name).trim() : '';
+        $('historialTitulo').textContent = nombre
+            ? 'Horarios asignados — ' + nombre
+            : 'Horarios asignados';
+        $('personaActivaLabel').textContent = nombre
+            ? 'Consultando: ' + nombre
+            : '';
+    }
+
+    function seleccionarPersonaActiva(person, opts) {
+        personaActiva = txt(person).trim() || null;
+        getFilasPersonas().forEach((tr) => {
+            const activa = txt(tr.dataset.person).trim() === personaActiva;
+            tr.classList.toggle('persona-row-active', activa);
+            tr.classList.toggle('table-active', activa);
+            if (activa && opts && opts.focus) tr.focus();
+        });
+        actualizarEncabezadoHistorial();
+        renderHistorial();
+    }
+
+    function moverPersonaActiva(delta) {
+        const filas = getFilasPersonas();
+        if (!filas.length) return;
+        let idx = filas.findIndex((tr) => tr.classList.contains('persona-row-active'));
+        if (idx < 0) idx = 0;
+        else idx = Math.max(0, Math.min(filas.length - 1, idx + delta));
+        seleccionarPersonaActiva(filas[idx].dataset.person, { focus: true });
+        filas[idx].scrollIntoView({ block: 'nearest' });
+    }
 
     function actualizarContador() {
         const n = document.querySelectorAll('.chk-persona:checked').length;
-        $('countSelected').innerText = n + ' seleccionados';
+        $('countSelected').innerText = n + ' marcado(s) para asignación masiva';
     }
 
     function toggleAll(source) {
@@ -119,7 +221,16 @@
 
     function renderHistorial() {
         const body = $('tablaAsignacionesBody');
-        body.innerHTML = historial.map((a) => {
+        if (!personaActiva) {
+            body.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">Haga clic en un trabajador o use las flechas ↑ ↓ para ver sus horarios.</td></tr>';
+            return;
+        }
+        const items = historial.filter((a) => txt(a.Person).trim() === personaActiva);
+        if (items.length === 0) {
+            body.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">Este trabajador no tiene horarios asignados.</td></tr>';
+            return;
+        }
+        body.innerHTML = items.map((a) => {
             const periodo = fechaUi(a.FechaInicio) + ' - ' + (a.FechaFin ? fechaUi(a.FechaFin) : '-');
             const idAsignacion = txt(a.IdAsignacion).trim();
             return '<tr>'
@@ -127,6 +238,8 @@
                 + '<td><span class="badge bg-light text-dark border">' + esc(a.Horario) + '</span></td>'
                 + '<td>' + esc(periodo) + '</td>'
                 + '<td>'
+                + '<button class="btn btn-link btn-sm text-primary p-0 me-2" type="button" data-edit="' + esc(idAsignacion) + '" title="Editar">'
+                + '<i class="bi bi-pencil"></i></button>'
                 + '<button class="btn btn-link btn-sm text-danger p-0" type="button" data-del="' + esc(idAsignacion) + '" title="Eliminar">'
                 + '<i class="bi bi-trash"></i></button>'
                 + '</td>'
@@ -161,15 +274,19 @@
         if (!res.ok || !json.success) throw new Error(json.error || 'No se pudo cargar personal.');
         const data = Array.isArray(json.data) ? json.data : [];
         $('listaPersonasBody').innerHTML = data.map((p) =>
-            '<tr class="persona-row">'
+            '<tr class="persona-row" data-person="' + esc(p.Person) + '" data-name="' + esc(p.Name) + '" tabindex="-1">'
             + '<td class="ps-3"><input type="checkbox" class="form-check-input chk-persona" value="' + esc(p.Person) + '"></td>'
             + '<td class="text-muted">' + esc(p.Person) + '</td>'
             + '<td class="fw-bold">' + esc(p.Name) + '</td>'
             + '</tr>'
         ).join('');
         $('checkAll').checked = false;
+        personaActiva = null;
         actualizarContador();
         await cargarHistorial();
+        const filas = getFilasPersonas();
+        if (filas.length) seleccionarPersonaActiva(filas[0].dataset.person, { focus: true });
+        else actualizarEncabezadoHistorial();
     }
 
     async function guardarAsignacionMasiva() {
@@ -223,6 +340,55 @@
         await cargarHistorial();
     }
 
+    function abrirEditarAsignacion(idAsignacion) {
+        const item = historial.find((a) => txt(a.IdAsignacion).trim() === txt(idAsignacion).trim());
+        if (!item) return;
+        $('editIdAsignacion').value = txt(idAsignacion).trim();
+        $('editHorarioNombre').textContent = txt(item.Horario).trim();
+        $('editFechaIni').value = dateOnly(item.FechaInicio);
+        $('editFechaFin').value = dateOnly(item.FechaFin);
+        modalEditar.show();
+    }
+
+    async function guardarEdicionAsignacion(e) {
+        e.preventDefault();
+        const idAsignacion = txt($('editIdAsignacion').value).trim();
+        const fechaIni = $('editFechaIni').value;
+        const fechaFin = $('editFechaFin').value;
+        if (!fechaIni) {
+            alert('Indique la fecha de inicio.');
+            return;
+        }
+        if (fechaFin && fechaFin < fechaIni) {
+            alert('La fecha fin no puede ser menor que la fecha inicio.');
+            return;
+        }
+
+        const btn = $('btnGuardarEdicion');
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/asignaciones/actualizar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cia: $('ciaSelector').value,
+                    id_asignacion: idAsignacion,
+                    fecha_ini: fechaIni,
+                    fecha_fin: fechaFin
+                })
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) {
+                alert(json.error || 'No se pudo actualizar la asignación.');
+                return;
+            }
+            modalEditar.hide();
+            await cargarHistorial();
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     $('ciaSelector').addEventListener('change', async function () {
         try {
             await cargarHorarios();
@@ -234,10 +400,33 @@
     });
     $('checkAll').addEventListener('change', function () { toggleAll(this); });
     $('listaPersonasBody').addEventListener('change', function (e) {
-        if (e.target && e.target.classList.contains('chk-persona')) actualizarContador();
+        if (e.target && e.target.classList.contains('chk-persona')) {
+            e.stopPropagation();
+            actualizarContador();
+        }
+    });
+    $('listaPersonasBody').addEventListener('click', function (e) {
+        if (e.target.closest('.chk-persona')) return;
+        const row = e.target.closest('.persona-row');
+        if (row) seleccionarPersonaActiva(row.dataset.person, { focus: true });
+    });
+    $('listaPersonasBody').addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            moverPersonaActiva(1);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            moverPersonaActiva(-1);
+        }
     });
     $('btnAsignarMasivo').addEventListener('click', guardarAsignacionMasiva);
+    $('formEditarAsignacion').addEventListener('submit', guardarEdicionAsignacion);
     $('tablaAsignacionesBody').addEventListener('click', function (e) {
+        const btnEdit = e.target.closest('[data-edit]');
+        if (btnEdit) {
+            abrirEditarAsignacion(btnEdit.getAttribute('data-edit'));
+            return;
+        }
         const btn = e.target.closest('[data-del]');
         if (btn) eliminarAsignacion(btn.getAttribute('data-del'));
     });

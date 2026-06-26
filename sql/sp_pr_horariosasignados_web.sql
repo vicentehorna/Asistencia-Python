@@ -1,19 +1,33 @@
-SET ANSI_NULLS ON
+/*
+  Procedimiento: sp_pr_horariosasignados_web
+  Uso: Listado de horarios asignados por compañía (Asignación de Horarios)
+  Parámetros: @cia
+*/
+SET ANSI_NULLS ON;
 GO
-SET QUOTED_IDENTIFIER ON
+SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE procedure [dbo].[sp_pr_horariosasignados_web]
-@cia varchar(4)
-as 
-Begin
-    select 
-        SY_Person.Person as person,
-        SY_Person.Name as name,
-        Horarios.NombreHorario,
-        AsignacionHorarios.FechaInicio as fechinicio,
-        AsignacionHorarios.FechaFin as fechafin, AsignacionHorarios.IdAsignacion
-    from AsignacionHorarios inner join Horarios on (AsignacionHorarios.IdHorario = Horarios.IdHorario and AsignacionHorarios.Company = @cia)
-    inner join SY_Person on (AsignacionHorarios.Person = SY_Person.Person)
-    order by 2
-End
+ALTER PROCEDURE [dbo].[sp_pr_horariosasignados_web]
+    @cia VARCHAR(4)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        SY_Person.Person AS person,
+        SY_Person.Name AS name,
+        Horarios.NombreHorario,
+        AsignacionHorarios.FechaInicio AS fechinicio,
+        AsignacionHorarios.FechaFin AS fechafin,
+        AsignacionHorarios.IdAsignacion
+    FROM AsignacionHorarios
+    INNER JOIN Horarios
+        ON AsignacionHorarios.IdHorario = Horarios.IdHorario
+       AND Horarios.Company = @cia
+    INNER JOIN SY_Person
+        ON AsignacionHorarios.Person = SY_Person.Person
+    WHERE AsignacionHorarios.Company = @cia
+    ORDER BY SY_Person.Name;
+END;
+GO

@@ -1,15 +1,29 @@
-SET ANSI_NULLS ON
+/*
+  Procedimiento: sp_pr_listaenvioalertas_web
+  Uso: Configurar Alertas (GET /api/alertas/lista)
+  Parámetros: @cia
+*/
+SET ANSI_NULLS ON;
 GO
-SET QUOTED_IDENTIFIER ON
+SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE procedure [dbo].[sp_pr_listaenvioalertas_web]
-@cia varchar(4)
-as
-begin
-    select 
-        SY_Person.Person, SY_Person.Name, SY_Person.EMail, recibealertas
-    from CA_ConfiguracionAlertas inner join SY_Person on 
-    (CA_ConfiguracionAlertas.person = SY_Person.Person and CA_ConfiguracionAlertas.company = @cia)
-    order by 2
-end
+ALTER PROCEDURE [dbo].[sp_pr_listaenvioalertas_web]
+    @cia VARCHAR(4)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        SY_Person.Person,
+        SY_Person.Name,
+        SY_Person.EMail,
+        CA_ConfiguracionAlertas.RecibeAlertas AS recibealertas
+    FROM CA_ConfiguracionAlertas
+    INNER JOIN SY_Person
+        ON CA_ConfiguracionAlertas.Person = SY_Person.Person
+    WHERE CA_ConfiguracionAlertas.Company = @cia
+    ORDER BY
+        SY_Person.Name;
+END
+GO

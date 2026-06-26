@@ -829,6 +829,174 @@ def get_listado_marcas(cia, fecha_inicio, fecha_fin, person):
         return [], str(e)
 
 
+def _fmt_fecha_advertencia_marca(valor):
+    from datetime import date, datetime as dt
+
+    if valor is None:
+        return ''
+    if isinstance(valor, dt):
+        return valor.strftime('%d/%m/%Y')
+    if isinstance(valor, date):
+        return valor.strftime('%d/%m/%Y')
+    s = str(valor).strip()
+    if len(s) >= 10 and s[4:5] == '-' and s[7:8] == '-':
+        try:
+            return dt.strptime(s[:10], '%Y-%m-%d').strftime('%d/%m/%Y')
+        except ValueError:
+            pass
+    return s
+
+
+def get_validaciones_marcas_sin_horario(company, fechaini, fechafin):
+    """
+    Marcas activas en el rango sin asignación de horario vigente ese día.
+    Retorna lista de mensajes para la ventana Procesar Asistencia.
+    """
+    cia = (company or '').strip()[:4]
+    if not cia or not fechaini or not fechafin:
+        return []
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_validarmarcassinhorario_web] @cia=?, @fechaini=?, @fechafin=?",
+            (cia, fechaini, fechafin),
+        )
+        if not cursor.description:
+            cursor.close()
+            conn.close()
+            return []
+
+        cols = [c[0] for c in cursor.description]
+        por_persona = {}
+        nombres = {}
+        for row in cursor.fetchall():
+            d = dict(zip(cols, row))
+            lk = {str(k).lower(): v for k, v in d.items()}
+            person = str(lk.get('person') or '').strip()
+            if not person:
+                continue
+            name = str(lk.get('name') or '').strip()
+            nombres[person] = name
+            fecha_txt = _fmt_fecha_advertencia_marca(lk.get('fechamarca'))
+            if not fecha_txt:
+                continue
+            por_persona.setdefault(person, []).append(fecha_txt)
+
+        cursor.close()
+        conn.close()
+
+        mensajes = []
+        for person in sorted(por_persona.keys(), key=lambda p: (nombres.get(p) or p).upper()):
+            fechas = por_persona[person]
+            fechas_unicas = []
+            vistos = set()
+            for f in fechas:
+                if f in vistos:
+                    continue
+                vistos.add(f)
+                fechas_unicas.append(f)
+            etiqueta = f'DNI {person} — {nombres.get(person) or person}'
+            if len(fechas_unicas) == 1:
+                mensajes.append(
+                    f'{etiqueta}: tiene marca(s) el {fechas_unicas[0]} sin horario asignado.'
+                )
+            else:
+                mensajes.append(
+                    f'{etiqueta}: tiene marca(s) sin horario asignado el {", ".join(fechas_unicas)}.'
+                )
+        return mensajes
+    except Exception as e:
+        print(f"Error en get_validaciones_marcas_sin_horario: {e}")
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return [f'No se pudieron validar horarios: {e}']
+
+
+def get_validaciones_marcas_impares(company, fechaini, fechafin):
+    """
+    Días del rango con cantidad impar de marcas activas por trabajador.
+    Retorna lista de mensajes para la ventana Procesar Asistencia.
+    """
+    cia = (company or '').strip()[:4]
+    if not cia or not fechaini or not fechafin:
+        return []
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_validarmarcasimpares_web] @cia=?, @fechaini=?, @fechafin=?",
+            (cia, fechaini, fechafin),
+        )
+        if not cursor.description:
+            cursor.close()
+            conn.close()
+            return []
+
+        cols = [c[0] for c in cursor.description]
+        por_persona = {}
+        nombres = {}
+        for row in cursor.fetchall():
+            d = dict(zip(cols, row))
+            lk = {str(k).lower(): v for k, v in d.items()}
+            person = str(lk.get('person') or '').strip()
+            if not person:
+                continue
+            name = str(lk.get('name') or '').strip()
+            nombres[person] = name
+            fecha_txt = _fmt_fecha_advertencia_marca(lk.get('fechamarca'))
+            if not fecha_txt:
+                continue
+            cantidad = lk.get('cantidadmarcas')
+            try:
+                cantidad = int(cantidad)
+            except (TypeError, ValueError):
+                cantidad = None
+            por_persona.setdefault(person, []).append((fecha_txt, cantidad))
+
+        cursor.close()
+        conn.close()
+
+        mensajes = []
+        for person in sorted(por_persona.keys(), key=lambda p: (nombres.get(p) or p).upper()):
+            detalles = por_persona[person]
+            vistos = set()
+            fechas_detalle = []
+            for fecha_txt, cantidad in detalles:
+                if fecha_txt in vistos:
+                    continue
+                vistos.add(fecha_txt)
+                if cantidad is not None:
+                    fechas_detalle.append(f'{fecha_txt} ({cantidad} marca{"s" if cantidad != 1 else ""})')
+                else:
+                    fechas_detalle.append(fecha_txt)
+            etiqueta = f'DNI {person} — {nombres.get(person) or person}'
+            if len(fechas_detalle) == 1:
+                mensajes.append(
+                    f'{etiqueta}: cantidad impar de marcas el {fechas_detalle[0]}.'
+                )
+            else:
+                mensajes.append(
+                    f'{etiqueta}: cantidad impar de marcas el {", ".join(fechas_detalle)}.'
+                )
+        return mensajes
+    except Exception as e:
+        print(f"Error en get_validaciones_marcas_impares: {e}")
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return [f'No se pudieron validar marcas impares: {e}']
+
+
 def _parse_fecha_hora_marca_manual(fecha_str, hora_str):
     """Combina fecha (YYYY-MM-DD) y hora (HH:MM o HH:MM:SS) en datetime."""
     from datetime import datetime

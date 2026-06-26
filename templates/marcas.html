@@ -2,13 +2,72 @@
 
 {% block title %}Gestión de Marcas{% endblock %}
 
+{% block extra_css %}
+<style>
+    .table-scroll-container {
+        max-height: 65vh;
+        overflow: auto;
+        border: 1px solid #dee2e6;
+    }
+
+    .table-gestion-marcas {
+        font-size: 11px;
+        white-space: nowrap;
+        margin-bottom: 0;
+    }
+
+    .table-gestion-marcas th,
+    .table-gestion-marcas td {
+        padding: 0.25rem 0.5rem;
+        vertical-align: middle;
+    }
+
+    .table-gestion-marcas thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f8f9fa;
+        z-index: 2;
+        box-shadow: 0 1px 0 #dee2e6;
+        font-weight: 600;
+    }
+
+    .table-gestion-marcas .col-dni {
+        min-width: 6.5rem;
+        text-align: center;
+    }
+
+    .table-gestion-marcas .col-nombre {
+        min-width: 14rem;
+    }
+
+    .table-gestion-marcas .col-fecha {
+        min-width: 5.5rem;
+        text-align: center;
+    }
+
+    .table-gestion-marcas .col-cargo {
+        min-width: 10rem;
+    }
+
+    .table-gestion-marcas .col-evidencia,
+    .table-gestion-marcas .col-acciones {
+        width: 4rem;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    .table-gestion-marcas .col-acciones .btn-link {
+        line-height: 1;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div id="marcasRoot" class="container-fluid py-3" data-photos-base="{{ photos_base | e }}">
-    <h4 class="fw-bold mb-3" style="color: #1e293b;">Gestión de Marcas</h4>
     <div class="card shadow-sm border-0 mb-4">
-        <div class="card-body pt-4">
+        <div class="card-body pt-3">
             <form id="frmFiltros" class="row g-3">
-                <div class="col-md-4">
+                <div class="col-lg-3 col-md-4">
                     <label for="cia" class="form-label small fw-bold text-muted">Compañía</label>
                     <select id="cia" name="cia" class="form-select form-select-sm" required>
                         {% for c in companies %}
@@ -18,19 +77,27 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-2">
+                <div class="col-lg-2 col-md-3">
                     <label for="fechaInicio" class="form-label small fw-bold text-muted">Fecha Inicio</label>
                     <input type="date" id="fechaInicio" name="fechaInicio" class="form-control form-control-sm" required>
                 </div>
-                <div class="col-md-2">
+                <div class="col-lg-2 col-md-3">
                     <label for="fechaFin" class="form-label small fw-bold text-muted">Fecha Fin</label>
                     <input type="date" id="fechaFin" name="fechaFin" class="form-control form-control-sm" required>
                 </div>
-                <div class="col-md-4">
+                <div class="col-lg-3 col-md-4">
                     <label for="person" class="form-label small fw-bold text-muted">Trabajador</label>
                     <select id="person" name="person" class="form-select form-select-sm" disabled>
                         <option value="0">Todos</option>
                     </select>
+                </div>
+                <div class="col-lg-2 col-md-4 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="chkSoloImpares">
+                        <label class="form-check-label small" for="chkSoloImpares" title="Solo días con 1, 3 o 5 marcas del mismo trabajador">
+                            Solo marcas impares
+                        </label>
+                    </div>
                 </div>
 
                 <div class="col-12 border-top pt-3 mt-3">
@@ -44,7 +111,9 @@
                         <button type="button" class="btn btn-success btn-sm px-4" onclick="abrirModalManual()">
                             <i class="bi bi-plus-lg"></i> Manual
                         </button>
-                        <span class="ms-auto small text-muted fw-bold" id="lblRowCountMarcas">0 registros</span>
+                        <span class="ms-auto text-muted small fw-bold">
+                            No. de registros: <span id="lblRowCountMarcas">0</span>
+                        </span>
                     </div>
                 </div>
             </form>
@@ -52,22 +121,23 @@
     </div>
 
     <div class="card shadow-sm border-0">
-        <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 65vh; overflow-y: auto;">
-                <table class="table table-sm table-hover mb-0 align-middle" style="font-size: 0.82rem;">
-                    <thead class="table-light" style="position: sticky; top: 0; z-index: 1; color: #334155;">
-                        <tr class="text-center text-uppercase">
-                            <th class="py-2 text-start ps-3">DNI</th>
-                            <th class="text-start">Nombre</th>
-                            <th>Día</th>
-                            <th>Fecha</th>
-                            <th>Hora</th>
-                            <th class="text-start">Cargo</th>
-                            <th>Evidencia</th>
-                            <th style="width: 72px;">Acción</th>
+        <div class="card-body pt-3">
+            <h4 class="text-center fw-bold mb-3">Gestión de Marcas</h4>
+            <div class="table-scroll-container">
+                <table class="table table-bordered table-sm table-hover table-gestion-marcas align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th class="col-dni">DNI</th>
+                            <th class="col-nombre">Nombre</th>
+                            <th class="col-fecha">Día</th>
+                            <th class="col-fecha">Fecha</th>
+                            <th class="col-fecha">Hora</th>
+                            <th class="col-cargo">Cargo</th>
+                            <th class="col-evidencia">Evidencia</th>
+                            <th class="col-acciones">Acción</th>
                         </tr>
                     </thead>
-                    <tbody id="tablaMarcasBody" class="text-center"></tbody>
+                    <tbody id="tablaMarcasBody"></tbody>
                 </table>
             </div>
         </div>
@@ -132,6 +202,8 @@
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 let lastMarcasExcelPayload = null;
+let lastMarcasRowsRaw = [];
+let lastMarcasFilters = null;
 const MARCAS_STORAGE_KEY = 'asistencia.gestion_marcas.state.v1';
 
 document.addEventListener('DOMContentLoaded', async function () {
@@ -152,6 +224,16 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
+    const chkSoloImpares = document.getElementById('chkSoloImpares');
+    if (chkSoloImpares) {
+        chkSoloImpares.addEventListener('change', function () {
+            refreshMarcasListado();
+            if (lastMarcasRowsRaw.length) {
+                saveMarcasState({ filters: lastMarcasFilters, rows: lastMarcasRowsRaw });
+            }
+        });
+    }
+
     const saved = loadMarcasState();
     if (saved && saved.filters) {
         if (ciaEl && saved.filters.cia && optionExists(ciaEl, saved.filters.cia)) {
@@ -164,13 +246,13 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (personEl && saved.filters.person && optionExists(personEl, saved.filters.person)) {
             personEl.value = String(saved.filters.person);
         }
+        if (chkSoloImpares && saved.filters.soloImpares) {
+            chkSoloImpares.checked = true;
+        }
         if (Array.isArray(saved.rows)) {
-            renderMarcasRows(saved.rows, {
-                cia: (saved.filters.cia || ''),
-                person: (saved.filters.person || '0'),
-                fechaInicio: (saved.filters.fechaInicio || ''),
-                fechaFin: (saved.filters.fechaFin || '')
-            });
+            lastMarcasRowsRaw = saved.rows;
+            lastMarcasFilters = saved.filters || null;
+            refreshMarcasListado();
         }
     }
 });
@@ -179,7 +261,7 @@ function setRowCountMarcas(n) {
     const el = document.getElementById('lblRowCountMarcas');
     if (!el) return;
     const num = Math.max(0, parseInt(n, 10) || 0);
-    el.textContent = num === 1 ? '1 registro' : num + ' registros';
+    el.textContent = String(num);
 }
 
 function selectedOptionText(selectEl) {
@@ -402,6 +484,87 @@ function buildFotoUrl(rutaFoto) {
     return base + '/' + parts.join('/');
 }
 
+function soloMarcasImparesActivo() {
+    const chk = document.getElementById('chkSoloImpares');
+    return !!(chk && chk.checked);
+}
+
+function pickPersonFromMarcaRow(row) {
+    return String(pickRow(row, ['DNI', 'dni', 'Person', 'person']) || '').trim();
+}
+
+function pickFechaHoraMarcaRow(row) {
+    return pickRow(row, ['FechaHoraIngreso', 'fechahoraingreso']);
+}
+
+function fechaDiaKeyFromMarcaRow(row) {
+    const fh = pickFechaHoraMarcaRow(row);
+    if (!fh) return '';
+    const d = new Date(fh);
+    if (!isNaN(d.getTime())) {
+        return d.getFullYear() + '-' +
+            String(d.getMonth() + 1).padStart(2, '0') + '-' +
+            String(d.getDate()).padStart(2, '0');
+    }
+    const s = String(fh).trim();
+    const m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    return s.slice(0, 10);
+}
+
+function timestampMarcaRow(row) {
+    const fh = pickFechaHoraMarcaRow(row);
+    if (!fh) return 0;
+    const d = new Date(fh);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
+function aplicarFiltroMarcasImpares(rows) {
+    const source = Array.isArray(rows) ? rows.slice() : [];
+    if (!soloMarcasImparesActivo()) {
+        return source;
+    }
+    const groups = new Map();
+    source.forEach(function (row) {
+        const key = pickPersonFromMarcaRow(row) + '|' + fechaDiaKeyFromMarcaRow(row);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+    });
+    const out = [];
+    groups.forEach(function (groupRows) {
+        if (groupRows.length % 2 === 1) {
+            groupRows.sort(function (a, b) {
+                const ta = timestampMarcaRow(a);
+                const tb = timestampMarcaRow(b);
+                if (ta !== tb) return ta - tb;
+                const ia = pickRow(a, ['IdRegistro', 'idregistro']);
+                const ib = pickRow(b, ['IdRegistro', 'idregistro']);
+                return String(ia).localeCompare(String(ib));
+            });
+            groupRows.forEach(function (row) {
+                out.push(row);
+            });
+        }
+    });
+    out.sort(function (a, b) {
+        const na = String(pickRow(a, ['Nombre', 'nombre']) || '');
+        const nb = String(pickRow(b, ['Nombre', 'nombre']) || '');
+        if (na !== nb) return na.localeCompare(nb, 'es');
+        return timestampMarcaRow(a) - timestampMarcaRow(b);
+    });
+    return out;
+}
+
+function refreshMarcasListado() {
+    lastMarcasFilters = Object.assign({
+        cia: (document.getElementById('cia') && document.getElementById('cia').value) || '',
+        person: (document.getElementById('person') && document.getElementById('person').value) || '0',
+        fechaInicio: (document.getElementById('fechaInicio') && document.getElementById('fechaInicio').value) || '',
+        fechaFin: (document.getElementById('fechaFin') && document.getElementById('fechaFin').value) || ''
+    }, lastMarcasFilters || {}, { soloImpares: soloMarcasImparesActivo() });
+    renderMarcasRows(aplicarFiltroMarcasImpares(lastMarcasRowsRaw), lastMarcasFilters);
+}
+
 function renderMarcasRows(rows, filters) {
     const tbody = document.getElementById('tablaMarcasBody');
     const btnExport = document.getElementById('btnExportMarcasExcel');
@@ -470,14 +633,14 @@ function renderMarcasRows(rows, filters) {
 
         const tr = document.createElement('tr');
         tr.innerHTML =
-            '<td class="text-start ps-3 text-muted">' + escapeHtml(dni) + '</td>' +
-            '<td class="text-start fw-bold" style="color: #475569;">' + escapeHtml(nombre) + '</td>' +
-            '<td>' + escapeHtml(diaSem) + '</td>' +
-            '<td>' + escapeHtml(fechaStr) + '</td>' +
-            '<td class="fw-bold">' + escapeHtml(horaDisplay) + '</td>' +
-            '<td class="text-start text-muted" style="font-size: 0.75rem;">' + escapeHtml(cargo) + '</td>' +
-            '<td>' + evidenciaHtml + '</td>' +
-            '<td class="text-center">' + accionHtml + '</td>';
+            '<td class="col-dni">' + escapeHtml(dni) + '</td>' +
+            '<td class="col-nombre">' + escapeHtml(nombre) + '</td>' +
+            '<td class="col-fecha">' + escapeHtml(diaSem) + '</td>' +
+            '<td class="col-fecha">' + escapeHtml(fechaStr) + '</td>' +
+            '<td class="col-fecha">' + escapeHtml(horaDisplay) + '</td>' +
+            '<td class="col-cargo">' + escapeHtml(cargo) + '</td>' +
+            '<td class="col-evidencia">' + evidenciaHtml + '</td>' +
+            '<td class="col-acciones">' + accionHtml + '</td>';
         const btn = tr.querySelector('button[data-ruta]');
         if (btn) {
             btn.addEventListener('click', function () {
@@ -548,14 +711,23 @@ document.getElementById('frmFiltros').addEventListener('submit', async function 
         }
 
         const rows = Array.isArray(result.data) ? result.data : [];
-        renderMarcasRows(rows, { cia: cia, person: person, fechaInicio: fechaInicio, fechaFin: fechaFin });
+        lastMarcasRowsRaw = rows;
+        lastMarcasFilters = {
+            cia: cia,
+            person: person,
+            fechaInicio: fechaInicio,
+            fechaFin: fechaFin,
+            soloImpares: soloMarcasImparesActivo()
+        };
+        refreshMarcasListado();
         saveMarcasState({
-            filters: { cia: cia, person: person, fechaInicio: fechaInicio, fechaFin: fechaFin },
-            rows: rows
+            filters: lastMarcasFilters,
+            rows: lastMarcasRowsRaw
         });
     } catch (error) {
         console.error(error);
         setRowCountMarcas(0);
+        lastMarcasRowsRaw = [];
         document.getElementById('tablaMarcasBody').innerHTML = '';
         lastMarcasExcelPayload = null;
         if (btnExport) btnExport.disabled = true;
@@ -606,11 +778,13 @@ async function inactivarMarca(info, tr) {
             alert(data.error || 'No se pudo inactivar la marca.');
             return;
         }
-        if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
-        const tbody = document.getElementById('tablaMarcasBody');
-        const remaining = tbody ? tbody.querySelectorAll('tr').length : 0;
-        setRowCountMarcas(remaining);
-        if (!remaining) {
+        const idStr = String(idRegistro);
+        lastMarcasRowsRaw = lastMarcasRowsRaw.filter(function (row) {
+            return String(pickRow(row, ['IdRegistro', 'idregistro']) || '') !== idStr;
+        });
+        refreshMarcasListado();
+        saveMarcasState({ filters: lastMarcasFilters, rows: lastMarcasRowsRaw });
+        if (!lastMarcasRowsRaw.length) {
             lastMarcasExcelPayload = null;
             const btnExport = document.getElementById('btnExportMarcasExcel');
             if (btnExport) btnExport.disabled = true;
