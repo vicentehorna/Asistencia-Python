@@ -1075,11 +1075,8 @@ def insert_registro_asistencia_manual(cia, person, fecha_str, hora_str, motivo, 
         return False, "Seleccione un trabajador."
 
     motivo_stripped = (motivo or "").strip()
-    if not motivo_stripped:
-        return False, "El motivo / sustento es obligatorio."
-
     company_db = str(cia).strip()[:4].ljust(4)[:4]
-    motivo_db = motivo_stripped[:255]
+    motivo_db = motivo_stripped[:255] if motivo_stripped else None
     user_db = str(xlastuser or "").strip()[:20] if xlastuser else None
     now = datetime.now().replace(microsecond=0)
 

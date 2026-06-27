@@ -982,8 +982,6 @@ def api_marca_manual():
         return jsonify({"success": False, "error": "Seleccione un trabajador (no use «Todos»)."}), 400
     if not fecha or not hora:
         return jsonify({"success": False, "error": "Indique fecha y hora."}), 400
-    if not motivo:
-        return jsonify({"success": False, "error": "El motivo / sustento es obligatorio."}), 400
 
     usuario = str(
         getattr(current_user, "username", None)

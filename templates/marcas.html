@@ -185,8 +185,8 @@
                     </div>
                 </div>
                 <div class="mb-2">
-                    <label class="form-label small fw-bold" for="manualMotivo">Motivo / Sustento <span class="text-danger">*</span></label>
-                    <input type="text" id="manualMotivo" class="form-control form-control-sm shadow-none" placeholder="Ej: Olvido de fotocheck" required maxlength="255" autocomplete="off">
+                    <label class="form-label small fw-bold" for="manualMotivo">Motivo / Sustento <span class="text-muted fw-normal">(opcional)</span></label>
+                    <input type="text" id="manualMotivo" class="form-control form-control-sm shadow-none" placeholder="Ej: Olvido de fotocheck" maxlength="255" autocomplete="off">
                 </div>
             </div>
             <div class="modal-footer bg-light">
@@ -854,10 +854,6 @@ async function guardarMarcaManual() {
     }
     if (!fecha || !hora) {
         alert('Indique fecha y hora.');
-        return;
-    }
-    if (!motivo) {
-        alert('El motivo / sustento es obligatorio.');
         return;
     }
 
