@@ -51,7 +51,7 @@
 
     .table-gestion-marcas .col-evidencia,
     .table-gestion-marcas .col-acciones {
-        width: 4rem;
+        width: 5.5rem;
         text-align: center;
         white-space: nowrap;
     }
@@ -134,7 +134,7 @@
                             <th class="col-fecha">Hora</th>
                             <th class="col-cargo">Cargo</th>
                             <th class="col-evidencia">Evidencia</th>
-                            <th class="col-acciones">Acción</th>
+                            <th class="col-acciones">Acciones</th>
                         </tr>
                     </thead>
                     <tbody id="tablaMarcasBody"></tbody>
@@ -617,13 +617,20 @@ function renderMarcasRows(rows, filters) {
             evidenciaHtml = '<i class="bi bi-image text-muted opacity-25 fs-6" title="Sin foto"></i>';
         }
 
-        let accionHtml = '';
+        const fechaIso = fechaDiaKeyFromMarcaRow(row);
+
+        let accionHtml =
+            '<button type="button" class="btn btn-link btn-sm text-success p-0 me-1 btn-agregar-marca" ' +
+            'data-person="' + escapeHtml(String(dni || '')) + '" ' +
+            'data-fecha="' + escapeHtml(String(fechaIso || '')) + '" ' +
+            'title="Agregar marca manual">' +
+            '<i class="bi bi-plus-circle-fill fs-6"></i></button>';
         if (idRegistro) {
             const nomAttr = escapeHtml(String(nombre || ''));
             const dniAttr = escapeHtml(String(dni || ''));
             const fechaAttr = escapeHtml(String(fechaStr || ''));
             const horaAttr = escapeHtml(String(horaDisplay || ''));
-            accionHtml = '<button type="button" class="btn btn-link btn-sm text-danger p-0 btn-inactivar-marca" ' +
+            accionHtml += '<button type="button" class="btn btn-link btn-sm text-danger p-0 btn-inactivar-marca" ' +
                 'data-id="' + escapeHtml(String(idRegistro)) + '" ' +
                 'data-nombre="' + nomAttr + '" data-dni="' + dniAttr + '" ' +
                 'data-fecha="' + fechaAttr + '" data-hora="' + horaAttr + '" ' +
@@ -645,6 +652,15 @@ function renderMarcasRows(rows, filters) {
         if (btn) {
             btn.addEventListener('click', function () {
                 verEvidencia(this.getAttribute('data-ruta'), this.getAttribute('data-nombre'));
+            });
+        }
+        const btnAgregar = tr.querySelector('.btn-agregar-marca');
+        if (btnAgregar) {
+            btnAgregar.addEventListener('click', function () {
+                abrirModalManual({
+                    person: this.getAttribute('data-person'),
+                    fecha: this.getAttribute('data-fecha')
+                });
             });
         }
         const btnInactivar = tr.querySelector('.btn-inactivar-marca');
@@ -818,12 +834,13 @@ function syncSelectOptions(fromSelect, toSelect) {
     });
 }
 
-function abrirModalManual() {
+function abrirModalManual(prefill) {
+    const opts = prefill && typeof prefill === 'object' ? prefill : {};
     const person = document.getElementById('person');
     const manual = document.getElementById('trabajadorManual');
     if (person && manual) {
         syncSelectOptions(person, manual);
-        const pv = String(person.value || '').trim();
+        const pv = String(opts.person || person.value || '').trim();
         if (pv && pv !== '0') {
             manual.value = pv;
             const ok = Array.prototype.some.call(manual.options, function (o) { return String(o.value) === pv; });
@@ -833,8 +850,8 @@ function abrirModalManual() {
     const hoy = new Date().toISOString().split('T')[0];
     const mf = document.getElementById('manualFecha');
     const mh = document.getElementById('manualHora');
-    if (mf) mf.value = hoy;
-    if (mh) mh.value = horaLocalAhoraHHMMSS();
+    if (mf) mf.value = String(opts.fecha || '').trim() || hoy;
+    if (mh) mh.value = String(opts.hora || '').trim() || horaLocalAhoraHHMMSS();
     const mot = document.getElementById('manualMotivo');
     if (mot) mot.value = '';
     const modal = new bootstrap.Modal(document.getElementById('modalManual'));
