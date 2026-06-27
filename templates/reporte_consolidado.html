@@ -121,6 +121,9 @@
                     <button type="button" class="btn btn-info btn-sm px-4 text-white" id="btnRegistroPlanillas" disabled>
                         <i class="bi bi-journal-check"></i> Importar Planillas
                     </button>
+                    <button type="button" class="btn btn-warning btn-sm px-4 text-dark" id="btnRegularizar" disabled>
+                        <i class="bi bi-calendar-check"></i> Regularizar
+                    </button>
                     <span class="ms-auto text-muted small fw-bold">
                         No. de registros: <span id="lblRowCount">0</span>
                         <span class="ms-2">| Seleccionados: <span id="lblSelectedCount">0</span></span>
@@ -151,6 +154,53 @@
                 <tbody id="tbody-consolidado-asistencia"></tbody>
             </table>
         </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalRegularizar" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <form id="formRegularizar" class="modal-content border-0 shadow">
+            <div class="modal-header bg-warning py-2">
+                <h6 class="modal-title text-dark">Regularizar faltas</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2" id="resumenRegularizar"></p>
+                <p class="small mb-3">
+                    Se crearán marcas de <strong>entrada</strong> y <strong>salida</strong> según el horario asignado
+                    para cada día seleccionado, y se reprocesará la asistencia del trabajador.
+                </p>
+                <div class="table-responsive border rounded mb-3" style="max-height: 320px;">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th class="text-center" style="width: 2.5rem;">
+                                    <input type="checkbox" class="form-check-input" id="chkAllRegularizar" title="Seleccionar todos">
+                                </th>
+                                <th>Fecha</th>
+                                <th>Día</th>
+                                <th>Horario</th>
+                                <th>Entrada</th>
+                                <th>Salida</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyRegularizar"></tbody>
+                    </table>
+                </div>
+                <div class="mb-2">
+                    <label class="small fw-bold mb-1" for="txtComentarioRegularizar">Comentario (opcional)</label>
+                    <input type="text" id="txtComentarioRegularizar" class="form-control form-control-sm"
+                        maxlength="255" placeholder="Ej. Encargo de empresa">
+                </div>
+                <div class="alert small mb-0 d-none" id="mensajeRegularizar" role="alert"></div>
+            </div>
+            <div class="modal-footer bg-light py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+                <button type="submit" class="btn btn-warning btn-sm text-dark px-4" id="btnConfirmarRegularizar">
+                    <i class="bi bi-check2-circle"></i> Confirmar regularización
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -195,9 +245,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     const frm = document.getElementById('frmConsolidadoAsistencia');
     const btnExportExcel = document.getElementById('btnExportExcel');
     const btnRegistroPlanillas = document.getElementById('btnRegistroPlanillas');
+    const btnRegularizar = document.getElementById('btnRegularizar');
     const chkAllConsolidado = document.getElementById('chkAllConsolidado');
     const lblSelectedCount = document.getElementById('lblSelectedCount');
     const modalRegistroPlanillas = new bootstrap.Modal(document.getElementById('modalRegistroPlanillas'));
+    const modalRegularizar = new bootstrap.Modal(document.getElementById('modalRegularizar'));
+    const formRegularizar = document.getElementById('formRegularizar');
+    const tbodyRegularizar = document.getElementById('tbodyRegularizar');
+    const chkAllRegularizar = document.getElementById('chkAllRegularizar');
+    const resumenRegularizar = document.getElementById('resumenRegularizar');
+    const mensajeRegularizar = document.getElementById('mensajeRegularizar');
+    const txtComentarioRegularizar = document.getElementById('txtComentarioRegularizar');
+    const btnConfirmarRegularizar = document.getElementById('btnConfirmarRegularizar');
     const cboPeriodoPlanilla = document.getElementById('cboPeriodoPlanilla');
     const resumenRegistroPlanillas = document.getElementById('resumenRegistroPlanillas');
     const mensajeRegistroPlanillas = document.getElementById('mensajeRegistroPlanillas');
@@ -208,6 +267,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     const lblRowCount = document.getElementById('lblRowCount');
     let lastExportPayload = null;
     let lastRowsData = [];
+    let regularizarContext = null;
     const STORAGE_KEY = 'asistencia.reporte_consolidado.state.v1';
 
     function setRowCount(n) {
@@ -225,8 +285,17 @@ document.addEventListener('DOMContentLoaded', async function () {
         return Array.from(document.querySelectorAll('.chk-consolidado:checked')).map((chk) => ({
             person: chk.value,
             minutos: parseInt(chk.dataset.minutos || '0', 10) || 0,
-            name: chk.dataset.name || ''
+            name: chk.dataset.name || '',
+            faltas: parseInt(chk.dataset.faltas || '0', 10) || 0
         }));
+    }
+
+    function updateActionButtons() {
+        const selected = getSelectedRows();
+        const oneWithFaltas = selected.length === 1 && selected[0].faltas > 0;
+        if (btnRegularizar) {
+            btnRegularizar.disabled = !oneWithFaltas;
+        }
     }
 
     function updateSelectionUi() {
@@ -237,6 +306,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             chkAllConsolidado.indeterminate = selected > 0 && selected < checks.length;
             chkAllConsolidado.checked = checks.length > 0 && selected === checks.length;
         }
+        updateActionButtons();
     }
 
     function resetSelection() {
@@ -245,6 +315,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             chkAllConsolidado.indeterminate = false;
         }
         setSelectedCount(0);
+        updateActionButtons();
     }
 
     function saveState(state) {
@@ -362,6 +433,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                     <input type="checkbox" class="form-check-input chk-consolidado"
                         value="${escapeHtml(person)}"
                         data-minutos="${minutos}"
+                        data-faltas="${isNaN(faltasN) ? 0 : faltasN}"
                         data-name="${escapeHtml(pickName(row))}">
                 </td>
                 <td class="sticky-col-1 font-monospace fw-bold text-center">${escapeHtml(person)}</td>
@@ -373,6 +445,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             tbody.appendChild(tr);
         });
         if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = data.length === 0;
+        updateActionButtons();
     }
 
     function selectedText(selectEl) {
@@ -759,6 +832,209 @@ document.addEventListener('DOMContentLoaded', async function () {
             console.error(err);
             mostrarResultadoRegistroPlanillas('danger', 'Error de red o del servidor.');
         } finally {
+            btn.disabled = false;
+        }
+    });
+
+    function pickRowField(row, keys) {
+        for (let i = 0; i < keys.length; i++) {
+            const k = keys[i];
+            if (row[k] != null && String(row[k]).trim() !== '') return row[k];
+            const lower = String(k).toLowerCase();
+            const found = Object.keys(row).find((rk) => String(rk).toLowerCase() === lower);
+            if (found && row[found] != null && String(row[found]).trim() !== '') return row[found];
+        }
+        return '';
+    }
+
+    function formatFechaDisplay(iso) {
+        const txt = String(iso || '').trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(txt)) return txt;
+        const p = txt.split('-');
+        return p[2] + '/' + p[1] + '/' + p[0];
+    }
+
+    function prepararModalRegularizar(trabajador) {
+        mensajeRegularizar.className = 'alert small mb-0 d-none';
+        mensajeRegularizar.innerHTML = '';
+        txtComentarioRegularizar.value = '';
+        txtComentarioRegularizar.disabled = false;
+        btnConfirmarRegularizar.disabled = false;
+        btnConfirmarRegularizar.classList.remove('d-none');
+        if (chkAllRegularizar) {
+            chkAllRegularizar.checked = false;
+            chkAllRegularizar.indeterminate = false;
+        }
+        resumenRegularizar.textContent =
+            'Trabajador: ' + (trabajador.name || trabajador.person)
+            + ' (DNI ' + trabajador.person + ') — '
+            + trabajador.faltas + ' falta(s) en el periodo consultado.';
+        tbodyRegularizar.innerHTML = '<tr><td colspan="6" class="text-center text-muted small py-3">Cargando...</td></tr>';
+    }
+
+    function renderDiasRegularizar(items) {
+        tbodyRegularizar.innerHTML = '';
+        if (!items.length) {
+            tbodyRegularizar.innerHTML =
+                '<tr><td colspan="6" class="text-center text-muted small py-3">No hay días con falta pendientes de regularizar.</td></tr>';
+            if (chkAllRegularizar) chkAllRegularizar.disabled = true;
+            btnConfirmarRegularizar.disabled = true;
+            return;
+        }
+        if (chkAllRegularizar) {
+            chkAllRegularizar.disabled = false;
+            chkAllRegularizar.checked = true;
+        }
+        items.forEach((item) => {
+            const fecha = String(pickRowField(item, ['Fecha', 'fecha']) || '').slice(0, 10);
+            const tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td class="text-center">' +
+                '<input type="checkbox" class="form-check-input chk-dia-regularizar" value="' + escapeHtml(fecha) + '" checked>' +
+                '</td>' +
+                '<td>' + escapeHtml(formatFechaDisplay(fecha)) + '</td>' +
+                '<td>' + escapeHtml(pickRowField(item, ['DiaSem', 'diasem'])) + '</td>' +
+                '<td>' + escapeHtml(pickRowField(item, ['NombreHorario', 'nombrehorario'])) + '</td>' +
+                '<td>' + escapeHtml(pickRowField(item, ['HoraEntrada', 'horaentrada'])) + '</td>' +
+                '<td>' + escapeHtml(pickRowField(item, ['HoraSalida', 'horasalida'])) + '</td>';
+            tbodyRegularizar.appendChild(tr);
+        });
+        btnConfirmarRegularizar.disabled = false;
+    }
+
+    function getDiasRegularizarSeleccionados() {
+        return Array.from(document.querySelectorAll('.chk-dia-regularizar:checked'))
+            .map((chk) => chk.value)
+            .filter(Boolean);
+    }
+
+    function updateRegularizarChecksUi() {
+        const checks = document.querySelectorAll('.chk-dia-regularizar');
+        const selected = document.querySelectorAll('.chk-dia-regularizar:checked').length;
+        if (chkAllRegularizar) {
+            chkAllRegularizar.indeterminate = selected > 0 && selected < checks.length;
+            chkAllRegularizar.checked = checks.length > 0 && selected === checks.length;
+        }
+        if (btnConfirmarRegularizar) {
+            btnConfirmarRegularizar.disabled = selected === 0;
+        }
+    }
+
+    function mostrarResultadoRegularizar(tipo, html) {
+        mensajeRegularizar.className = 'alert alert-' + tipo + ' small mb-0';
+        mensajeRegularizar.innerHTML = html;
+        mensajeRegularizar.classList.remove('d-none');
+    }
+
+    async function refrescarConsolidadoActual() {
+        if (!frm) return;
+        if (typeof frm.requestSubmit === 'function') {
+            frm.requestSubmit();
+        } else {
+            frm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        }
+    }
+
+    btnRegularizar.addEventListener('click', async function () {
+        const seleccionados = getSelectedRows();
+        if (seleccionados.length !== 1) {
+            alert('Seleccione exactamente un trabajador con faltas para regularizar.');
+            return;
+        }
+        const trabajador = seleccionados[0];
+        if (!trabajador.faltas) {
+            alert('El trabajador seleccionado no tiene faltas en el periodo.');
+            return;
+        }
+        const cia = cboCompania.value.trim();
+        const fechaini = txtFechaIni.value.trim();
+        const fechafin = txtFechaFin.value.trim();
+        if (!cia || !fechaini || !fechafin) {
+            alert('Complete compañía y rango de fechas.');
+            return;
+        }
+        regularizarContext = { cia, person: trabajador.person, fechaini, fechafin, trabajador };
+        prepararModalRegularizar(trabajador);
+        modalRegularizar.show();
+        try {
+            const url = '/api/consolidado/faltas-regularizar?cia=' + encodeURIComponent(cia)
+                + '&person=' + encodeURIComponent(trabajador.person)
+                + '&fechaini=' + encodeURIComponent(fechaini)
+                + '&fechafin=' + encodeURIComponent(fechafin);
+            const res = await fetch(url);
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+                tbodyRegularizar.innerHTML =
+                    '<tr><td colspan="6" class="text-center text-danger small py-3">'
+                    + escapeHtml(json.error || 'No se pudieron cargar las faltas.') + '</td></tr>';
+                btnConfirmarRegularizar.disabled = true;
+                return;
+            }
+            renderDiasRegularizar(Array.isArray(json.data) ? json.data : []);
+        } catch (err) {
+            console.error(err);
+            tbodyRegularizar.innerHTML =
+                '<tr><td colspan="6" class="text-center text-danger small py-3">Error de red al cargar las faltas.</td></tr>';
+            btnConfirmarRegularizar.disabled = true;
+        }
+    });
+
+    if (chkAllRegularizar) {
+        chkAllRegularizar.addEventListener('change', function () {
+            document.querySelectorAll('.chk-dia-regularizar').forEach((chk) => {
+                chk.checked = chkAllRegularizar.checked;
+            });
+            updateRegularizarChecksUi();
+        });
+    }
+
+    if (tbodyRegularizar) {
+        tbodyRegularizar.addEventListener('change', function (e) {
+            if (e.target && e.target.classList.contains('chk-dia-regularizar')) {
+                updateRegularizarChecksUi();
+            }
+        });
+    }
+
+    formRegularizar.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        if (!regularizarContext) return;
+        const fechas = getDiasRegularizarSeleccionados();
+        if (!fechas.length) {
+            alert('Seleccione al menos un día para regularizar.');
+            return;
+        }
+        const btn = btnConfirmarRegularizar;
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/consolidado/regularizar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cia: regularizarContext.cia,
+                    person: regularizarContext.person,
+                    fechas: fechas,
+                    comentario: txtComentarioRegularizar.value.trim()
+                })
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) {
+                mostrarResultadoRegularizar('danger', escapeHtml(json.error || 'No se pudo regularizar.'));
+                btn.disabled = false;
+                return;
+            }
+            const n = (json.resumen && json.resumen.regularizados) || fechas.length;
+            txtComentarioRegularizar.disabled = true;
+            btn.classList.add('d-none');
+            mostrarResultadoRegularizar(
+                'success',
+                '<i class="bi bi-check-circle-fill me-1"></i><strong>Regularización completada.</strong><br>'
+                + 'Días regularizados: <strong>' + n + '</strong>. Se crearon las marcas y se reprocesó la asistencia.'
+            );
+            await refrescarConsolidadoActual();
+        } catch (err) {
+            console.error(err);
+            mostrarResultadoRegularizar('danger', 'Error de red o del servidor.');
             btn.disabled = false;
         }
     });

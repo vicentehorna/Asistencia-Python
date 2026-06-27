@@ -39,6 +39,8 @@ from database import (
     get_validaciones_marcas_impares,
     get_periodos_planilla_por_compania,
     registrar_tardanza_planilla,
+    get_faltas_regularizar,
+    regularizar_faltas,
 )
 
 load_dotenv()
@@ -1485,6 +1487,55 @@ def api_registro_tardanza_planilla():
     ok, err, resumen = registrar_tardanza_planilla(cia, prperiod, payload, usuario)
     if not ok:
         return jsonify({"success": False, "error": err, "resumen": resumen}), 400 if resumen else 500
+    return jsonify({"success": True, "resumen": resumen})
+
+
+@app.route('/api/consolidado/faltas-regularizar', methods=['GET'])
+@login_required
+def api_faltas_regularizar():
+    """Lista días con falta de un trabajador para el modal Regularizar."""
+    cia = (request.args.get('cia') or '').strip()
+    person = (request.args.get('person') or '').strip()
+    fechaini = (request.args.get('fechaini') or '').strip()
+    fechafin = (request.args.get('fechafin') or '').strip()
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    if not person or person == '0':
+        return jsonify({"success": False, "error": "Seleccione un trabajador.", "data": []}), 400
+    if not fechaini or not fechafin:
+        return jsonify({"success": False, "error": "Indique fecha inicio y fin.", "data": []}), 400
+
+    try:
+        data = get_faltas_regularizar(cia, person, fechaini, fechafin)
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        logging.exception("api_faltas_regularizar")
+        return jsonify({"success": False, "error": str(e), "data": []}), 500
+
+
+@app.route('/api/consolidado/regularizar', methods=['POST'])
+@login_required
+def api_regularizar_faltas():
+    """Crea marcas según horario para días de falta seleccionados."""
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    person = (body.get('person') or '').strip()
+    fechas = body.get('fechas') or []
+    comentario = (body.get('comentario') or '').strip()
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not person or person == '0':
+        return jsonify({"success": False, "error": "Seleccione un trabajador."}), 400
+    if not isinstance(fechas, list) or not fechas:
+        return jsonify({"success": False, "error": "Seleccione al menos un día."}), 400
+
+    usuario = session.get('userid') or session.get('username') or 'WEB'
+    ok, err, resumen = regularizar_faltas(cia, person, fechas, comentario, usuario)
+    if not ok:
+        return jsonify({"success": False, "error": err, "resumen": resumen}), 400
     return jsonify({"success": True, "resumen": resumen})
 
 

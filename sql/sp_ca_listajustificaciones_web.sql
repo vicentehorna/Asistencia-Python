@@ -1,18 +1,38 @@
-SET ANSI_NULLS ON
+/*
+  Procedimiento: sp_ca_listajustificaciones_web
+  Uso: Justificaciones por Persona (api/justificaciones_persona/listar)
+  Parámetros: @cia, @person ('0' = todos los trabajadores)
+*/
+SET ANSI_NULLS ON;
 GO
-SET QUOTED_IDENTIFIER ON
+SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE procedure [dbo].[sp_ca_listajustificaciones_web]
-@cia char(4), @person varchar(20)
-as
-begin 
-    select 
-        SY_Person.person as DNI, SY_Person.Name, CA_TipoJustificacion.Abreviatura, CA_JustificacionPersona.fechainicio, CA_JustificacionPersona.fechafin,
-        CA_JustificacionPersona.comentario, CA_JustificacionPersona.id as ID, CA_JustificacionPersona.idjustificacion as idjustificacion
-    from CA_JustificacionPersona inner join SY_Person on (CA_JustificacionPersona.person = SY_Person.Person)
-    inner join CA_TipoJustificacion on (CA_JustificacionPersona.idjustificacion = CA_TipoJustificacion.IdJustificacion)
-    WHERE CA_JustificacionPersona.company = @cia
-    and (@person = '0' or CA_JustificacionPersona.person = @person)
-    order by 2, 4
-end
+ALTER PROCEDURE [dbo].[sp_ca_listajustificaciones_web]
+    @cia    CHAR(4),
+    @person VARCHAR(20)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        P.Person AS DNI,
+        P.Name,
+        TJ.Abreviatura,
+        JP.FechaInicio,
+        JP.FechaFin,
+        JP.Comentario,
+        JP.Id AS ID,
+        JP.IdJustificacion AS idjustificacion
+    FROM CA_JustificacionPersona JP
+    INNER JOIN SY_Person P
+        ON JP.Person = P.Person
+    INNER JOIN CA_TipoJustificacion TJ
+        ON JP.IdJustificacion = TJ.IdJustificacion
+    WHERE JP.company = @cia
+      AND (@person = '0' OR JP.Person = @person)
+    ORDER BY
+        P.Name,
+        JP.FechaInicio;
+END
+GO

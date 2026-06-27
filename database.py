@@ -2046,3 +2046,125 @@ def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
             except Exception:
                 pass
 
+
+def get_faltas_regularizar(cia, person, fechaini, fechafin):
+    """Días con falta pendientes de regularizar para un trabajador."""
+    company = (cia or '').strip()[:4]
+    person_db = (person or '').strip()
+    if not company or not person_db or not fechaini or not fechafin:
+        return []
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            EXEC [dbo].[sp_ca_listarfaltasregularizar_web]
+                @cia=?, @person=?, @fechaini=?, @fechafin=?
+            """,
+            (company, person_db, fechaini, fechafin),
+        )
+        if not cursor.description:
+            cursor.close()
+            conn.close()
+            return []
+
+        cols = [str(c[0]).strip() for c in cursor.description]
+        data = []
+        for row in cursor.fetchall():
+            item = {}
+            for i, col in enumerate(cols):
+                key = col if col else f"col{i + 1}"
+                val = row[i]
+                if hasattr(val, 'isoformat'):
+                    item[key] = val.isoformat()[:10] if 'fecha' in key.lower() else val.isoformat()
+                else:
+                    item[key] = val
+            data.append(item)
+        cursor.close()
+        conn.close()
+        return data
+    except Exception as e:
+        print(f"Error en get_faltas_regularizar: {e}")
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        raise
+
+
+def regularizar_faltas(cia, person, fechas, comentario, usuario):
+    """
+    Regulariza faltas seleccionadas: crea marcas según horario y reprocesa asistencia.
+    fechas: lista de strings yyyy-mm-dd
+    Retorna (ok, error, resumen dict con regularizados, fechaMin, fechaMax).
+    """
+    company = (cia or '').strip()[:4]
+    person_db = (person or '').strip()
+    if not company or not person_db:
+        return False, 'Compañía o trabajador no válido.', None
+
+    fechas_limpias = []
+    for f in fechas or []:
+        txt = str(f).strip()[:10]
+        if txt and txt not in fechas_limpias:
+            fechas_limpias.append(txt)
+    if not fechas_limpias:
+        return False, 'Seleccione al menos un día para regularizar.', None
+
+    fechas_csv = ','.join(fechas_limpias)
+    comentario_db = (comentario or '').strip()[:255] or None
+    user_db = str(usuario or '').strip()[:20] or None
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            EXEC [dbo].[sp_ca_regularizarfaltas_web]
+                @cia=?, @person=?, @fechas=?, @comentario=?, @xlastuser=?
+            """,
+            (company, person_db, fechas_csv, comentario_db, user_db),
+        )
+        if not cursor.description:
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return False, 'Sin respuesta del procedimiento de regularización.', None
+
+        cols = [str(c[0]).strip().lower() for c in cursor.description]
+        row = cursor.fetchone()
+        data = dict(zip(cols, row)) if row else {}
+        while cursor.nextset():
+            pass
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        regularizados = int(data.get('regularizados') or 0)
+        resumen = {
+            'regularizados': regularizados,
+            'fechaMin': data.get('fechamin'),
+            'fechaMax': data.get('fechamax'),
+        }
+        if regularizados <= 0:
+            return False, 'No se pudo regularizar ningún día. Verifique que sigan registrados como falta.', resumen
+        return True, None, resumen
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        print(f"Error en regularizar_faltas: {e}")
+        return False, str(e), None
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+

@@ -7,7 +7,9 @@ Un archivo `.sql` por cada SP referenciado en `app.py` / `database.py`.
 | Script | Descripción |
 |--------|-------------|
 | `tables/RegistroAsistencia.sql` | Marcaciones; columna `estado` (A/I), FK a `Trabajadores` |
+| `tables/CA_RegularizacionFalta.sql` | Auditoría de regularización de faltas (consolidado) |
 | `migrations/20260325_RegistroAsistencia_estado.sql` | ALTER para agregar `estado` en BD existente |
+| `migrations/20260625_CA_RegularizacionFalta.sql` | Crear tabla `CA_RegularizacionFalta` en BD existente |
 
 ## Procedimientos
 
@@ -16,6 +18,8 @@ Un archivo `.sql` por cada SP referenciado en `app.py` / `database.py`.
 | `sp_ca_listajustificaciones_web` | app.py | @cia, @person | exportado desde BD |
 | `sp_ca_procesarasistencia_web` | app.py, database.py | @cia, @person, @fechaini, @fechafin | definición en repo |
 | `sp_ca_reporteconsolidado_web` | app.py | @cia, @person, @fechaini, @fechafin | exportado desde BD |
+| `sp_ca_listarfaltasregularizar_web` | app.py | @cia, @person, @fechaini, @fechafin | definición en repo |
+| `sp_ca_regularizarfaltas_web` | app.py | @cia, @person, @fechas, @comentario, @xlastuser | definición en repo |
 | `sp_ca_ReporteResumenAsistencia_web` | app.py | @cia, @fechaini, @fechafin, @person | definición en repo |
 | `sp_pr_Actualizardescarga_web` | database.py | @cia, @person, @tipodocumento, @prperiod | marcador (no en BD actual) |
 | `sp_pr_AprobarSolicitud_web` | database.py | @cia, @person, @controlyear, @line, @userid | marcador (no en BD actual) |
