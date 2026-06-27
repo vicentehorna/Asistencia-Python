@@ -1817,3 +1817,188 @@ def get_listado_generar_boletas(company, payrolltype, processtype, period, name=
         print(f"Error get_listado_generar_boletas: {e}")
         return []
 
+
+def get_periodos_planilla_por_compania(company, fechafin=None):
+    """
+    Periodos de planilla (PR_Period) para selector en registro desde asistencia.
+    Retorna dict: data [{id, text}], default_period (PRPeriod que contiene fechafin).
+    """
+    from datetime import date, datetime as dt
+
+    cia = (company or '').strip()[:10]
+    if not cia:
+        return {'data': [], 'default_period': None}
+
+    fecha_ref = None
+    if fechafin:
+        s = str(fechafin).strip()
+        if len(s) >= 10 and s[4:5] == '-' and s[7:8] == '-':
+            try:
+                fecha_ref = dt.strptime(s[:10], '%Y-%m-%d').date()
+            except ValueError:
+                fecha_ref = None
+        elif len(s) >= 8 and s[:8].isdigit():
+            try:
+                fecha_ref = dt.strptime(s[:8], '%Y%m%d').date()
+            except ValueError:
+                fecha_ref = None
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_selectorperiodosplanilla_web] @cia=?",
+            (cia,),
+        )
+        if not cursor.description:
+            cursor.close()
+            conn.close()
+            return {'data': [], 'default_period': None}
+
+        cols = [str(c[0]).strip().lower() for c in cursor.description]
+        rows = []
+        for row in cursor.fetchall():
+            data = dict(zip(cols, row))
+            pid = str(data.get('prperiod') or '').strip()
+            if not pid:
+                continue
+            rows.append({'id': pid, 'text': pid})
+
+        default_period = None
+        if fecha_ref is not None:
+            try:
+                # ODBC Driver {SQL Server} antiguo: no soporta binding de Python date.
+                dt_ref = dt.combine(fecha_ref, dt.min.time())
+                cursor.execute(
+                    """
+                    SELECT TOP 1 p.PRPeriod
+                    FROM PR_Period p
+                    WHERE p.Company = ?
+                      AND CONVERT(DATE, ?) BETWEEN CONVERT(DATE, p.DateBegin) AND CONVERT(DATE, p.DateEnd)
+                    ORDER BY p.PRPeriod DESC
+                    """,
+                    (cia, dt_ref),
+                )
+                match = cursor.fetchone()
+                if match:
+                    default_period = str(match[0] or '').strip() or None
+            except Exception as e_default:
+                print(f"Error periodo por fecha fin (se omite default): {e_default}")
+
+        cursor.close()
+        conn.close()
+        return {'data': rows, 'default_period': default_period}
+    except Exception as e:
+        print(f"Error get_periodos_planilla_por_compania: {e}")
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return {'data': [], 'default_period': None}
+
+
+def _normalize_pr_period_yyyymmdd(period_raw):
+    s = str(period_raw or '').strip().replace('-', '').replace('/', '')
+    if len(s) >= 8 and s[:8].isdigit():
+        return s[:8]
+    return str(period_raw or '').strip()
+
+
+def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
+    """
+    Registra minutos de tardanza (MIN_TARDANZA) en PR_EmployeeConcept por trabajador.
+    Usa sp_ca_registrartardanzaplanilla_web (un llamado por trabajador).
+    """
+    cia = (company or '').strip()[:10]
+    periodo = _normalize_pr_period_yyyymmdd(prperiod)
+    user = str(usuario or '').strip()[:20] or None
+    if not cia:
+        return False, 'Compañía no válida.', None
+    if not periodo:
+        return False, 'Indique el periodo de planilla.', None
+    if not isinstance(trabajadores, list) or not trabajadores:
+        return False, 'Seleccione al menos un trabajador.', None
+
+    conn = None
+    insertados = 0
+    actualizados = 0
+    errores = []
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+
+        for item in trabajadores:
+            if not isinstance(item, dict):
+                continue
+            person = str(item.get('person') or '').strip()
+            if not person:
+                continue
+            try:
+                minutos = int(item.get('minutos') or 0)
+            except (TypeError, ValueError):
+                errores.append({'person': person, 'name': '', 'error': 'Minutos de tardanza inválidos.'})
+                continue
+
+            cursor.execute(
+                """
+                EXEC [dbo].[sp_ca_registrartardanzaplanilla_web]
+                    @cia=?, @prperiod=?, @person=?, @minutos=?, @xlastuser=?
+                """,
+                (cia, periodo, person, minutos, user),
+            )
+            if not cursor.description:
+                errores.append({'person': person, 'name': '', 'error': 'Sin respuesta del procedimiento.'})
+                continue
+
+            cols = [str(c[0]).strip().lower() for c in cursor.description]
+            row = cursor.fetchone()
+            if not row:
+                errores.append({'person': person, 'name': '', 'error': 'Sin respuesta del procedimiento.'})
+                continue
+
+            data = dict(zip(cols, row))
+            accion = str(data.get('accion') or '').strip().upper()
+            nombre = str(data.get('name') or '').strip()
+            mensaje = str(data.get('mensaje') or '').strip()
+
+            if accion == 'I':
+                insertados += 1
+            elif accion == 'U':
+                actualizados += 1
+            else:
+                errores.append({
+                    'person': person,
+                    'name': nombre,
+                    'error': mensaje or 'No se pudo registrar.',
+                })
+
+            while cursor.nextset():
+                pass
+
+        conn.commit()
+        resumen = {
+            'insertados': insertados,
+            'actualizados': actualizados,
+            'errores': errores,
+            'procesados': insertados + actualizados,
+        }
+        if errores and (insertados + actualizados) == 0:
+            return False, 'No se pudo registrar ningún trabajador.', resumen
+        return True, None, resumen
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        print(f"Error registrar_tardanza_planilla: {e}")
+        return False, str(e), None
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+

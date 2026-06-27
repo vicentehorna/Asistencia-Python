@@ -36,6 +36,8 @@ from database import (
     get_destinatarios_prueba_alertas_email,
     get_validaciones_marcas_sin_horario,
     get_validaciones_marcas_impares,
+    get_periodos_planilla_por_compania,
+    registrar_tardanza_planilla,
 )
 
 load_dotenv()
@@ -153,7 +155,7 @@ def load_user(user_id):
 @app.route('/')
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('maestro_horarios'))
     return render_template('login.html')
 
 
@@ -163,7 +165,7 @@ def login_post():
     if user:
         login_user(user)
         ensure_user_session()
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('maestro_horarios'))
     flash('Usuario o contraseña incorrectos.', 'error')
     return redirect(url_for('login'))
 
@@ -197,7 +199,7 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html')
+    return redirect(url_for('maestro_horarios'))
 
 
 def _en_desarrollo(titulo):
@@ -1406,6 +1408,61 @@ def api_reporte_resumen_asistencia():
                 conn.close()
             except Exception:
                 pass
+
+
+@app.route('/api/selectores/periodos-planilla')
+@login_required
+def api_periodos_planilla():
+    """Periodos PR_Period por compañía (registro tardanza desde consolidado)."""
+    cia = (request.args.get('cia') or '').strip()
+    fechafin = (request.args.get('fechafin') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"data": [], "default_period": None})
+    result = get_periodos_planilla_por_compania(cia, fechafin)
+    return jsonify(result)
+
+
+@app.route('/api/planillas/registro-tardanza', methods=['POST'])
+@login_required
+def api_registro_tardanza_planilla():
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    prperiod = _normalize_pr_period(body.get('prperiod') or body.get('period'))
+    trabajadores = body.get('trabajadores') if isinstance(body.get('trabajadores'), list) else []
+
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not prperiod:
+        return jsonify({"success": False, "error": "Seleccione el periodo de planilla."}), 400
+    if not trabajadores:
+        return jsonify({"success": False, "error": "Seleccione al menos un trabajador."}), 400
+
+    payload = []
+    for item in trabajadores:
+        if not isinstance(item, dict):
+            continue
+        person = str(item.get('person') or '').strip()
+        if not person:
+            continue
+        try:
+            minutos = int(item.get('minutos') or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": f"Minutos inválidos para {person}."}), 400
+        payload.append({"person": person, "minutos": minutos})
+
+    if not payload:
+        return jsonify({"success": False, "error": "No hay trabajadores válidos para registrar."}), 400
+
+    usuario = str(
+        getattr(current_user, 'username', '')
+        or getattr(current_user, 'id', '')
+        or ''
+    )[:20]
+
+    ok, err, resumen = registrar_tardanza_planilla(cia, prperiod, payload, usuario)
+    if not ok:
+        return jsonify({"success": False, "error": err, "resumen": resumen}), 400 if resumen else 500
+    return jsonify({"success": True, "resumen": resumen})
 
 
 @app.route('/api/reportes/consolidado-asistencia', methods=['POST'])

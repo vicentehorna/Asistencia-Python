@@ -11,6 +11,7 @@
     }
 
     .table-planilla-vertical {
+        --sticky-col0-w: 2.25rem;
         --sticky-col1-w: 5.75rem;
         font-size: 11px;
         white-space: nowrap;
@@ -32,9 +33,21 @@
         font-weight: 600;
     }
 
-    .table-planilla-vertical .sticky-col-1 {
+    .table-planilla-vertical .sticky-col-0 {
         position: sticky;
         left: 0;
+        z-index: 1;
+        background-color: #fff;
+        min-width: var(--sticky-col0-w);
+        width: var(--sticky-col0-w);
+        max-width: var(--sticky-col0-w);
+        box-sizing: border-box;
+        text-align: center;
+    }
+
+    .table-planilla-vertical .sticky-col-1 {
+        position: sticky;
+        left: var(--sticky-col0-w);
         z-index: 1;
         background-color: #fff;
         min-width: var(--sticky-col1-w);
@@ -45,7 +58,7 @@
 
     .table-planilla-vertical .sticky-col-2 {
         position: sticky;
-        left: var(--sticky-col1-w);
+        left: calc(var(--sticky-col0-w) + var(--sticky-col1-w));
         z-index: 1;
         background-color: #fff;
         min-width: 13rem;
@@ -53,6 +66,7 @@
         box-sizing: border-box;
     }
 
+    .table-planilla-vertical thead th.sticky-col-0,
     .table-planilla-vertical thead th.sticky-col-1,
     .table-planilla-vertical thead th.sticky-col-2 {
         z-index: 3;
@@ -60,6 +74,12 @@
     }
 
     .table-planilla-vertical tbody tr.fila-falta td {
+        background-color: #fff3cd;
+    }
+
+    .table-planilla-vertical tbody tr.fila-falta td.sticky-col-0,
+    .table-planilla-vertical tbody tr.fila-falta td.sticky-col-1,
+    .table-planilla-vertical tbody tr.fila-falta td.sticky-col-2 {
         background-color: #fff3cd;
     }
 </style>
@@ -98,8 +118,12 @@
                     <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcel" disabled>
                         <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
                     </button>
+                    <button type="button" class="btn btn-info btn-sm px-4 text-white" id="btnRegistroPlanillas" disabled>
+                        <i class="bi bi-journal-check"></i> Registro Planillas
+                    </button>
                     <span class="ms-auto text-muted small fw-bold">
                         No. de registros: <span id="lblRowCount">0</span>
+                        <span class="ms-2">| Seleccionados: <span id="lblSelectedCount">0</span></span>
                     </span>
                 </div>
             </div>
@@ -114,6 +138,9 @@
             <table class="table table-bordered table-sm table-hover table-planilla-vertical align-middle mb-0">
                 <thead>
                     <tr>
+                        <th class="sticky-col-0">
+                            <input type="checkbox" class="form-check-input" id="chkAllConsolidado" title="Seleccionar todos">
+                        </th>
                         <th class="sticky-col-1 text-center">Persona</th>
                         <th class="sticky-col-2">Nombre</th>
                         <th class="text-end">Tardanza (HH:MM)</th>
@@ -124,6 +151,35 @@
                 <tbody id="tbody-consolidado-asistencia"></tbody>
             </table>
         </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalRegistroPlanillas" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form id="formRegistroPlanillas" class="modal-content border-0 shadow">
+            <div class="modal-header bg-info text-white py-2">
+                <h6 class="modal-title">Registro Planillas — Minutos de tardanza</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-3">
+                    Se registrará el concepto <strong>MIN_TARDANZA</strong> en asignación de conceptos
+                    para los trabajadores seleccionados.
+                </p>
+                <div class="mb-3">
+                    <label class="small fw-bold mb-1" for="cboPeriodoPlanilla">Periodo de planilla</label>
+                    <select id="cboPeriodoPlanilla" class="form-select form-select-sm" required></select>
+                </div>
+                <div class="alert alert-light border small mb-2" id="resumenRegistroPlanillas"></div>
+                <div class="alert small mb-0 d-none" id="mensajeRegistroPlanillas" role="alert"></div>
+            </div>
+            <div class="modal-footer bg-light py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+                <button type="submit" class="btn btn-info btn-sm text-white px-4" id="btnConfirmarRegistroPlanillas">
+                    <i class="bi bi-check2-circle"></i> Registrar
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 {% endblock %}
@@ -138,16 +194,57 @@ document.addEventListener('DOMContentLoaded', async function () {
     const txtFechaFin = document.getElementById('txtFechaFin');
     const frm = document.getElementById('frmConsolidadoAsistencia');
     const btnExportExcel = document.getElementById('btnExportExcel');
+    const btnRegistroPlanillas = document.getElementById('btnRegistroPlanillas');
+    const chkAllConsolidado = document.getElementById('chkAllConsolidado');
+    const lblSelectedCount = document.getElementById('lblSelectedCount');
+    const modalRegistroPlanillas = new bootstrap.Modal(document.getElementById('modalRegistroPlanillas'));
+    const cboPeriodoPlanilla = document.getElementById('cboPeriodoPlanilla');
+    const resumenRegistroPlanillas = document.getElementById('resumenRegistroPlanillas');
+    const mensajeRegistroPlanillas = document.getElementById('mensajeRegistroPlanillas');
+    const formRegistroPlanillas = document.getElementById('formRegistroPlanillas');
+    const btnConfirmarRegistroPlanillas = document.getElementById('btnConfirmarRegistroPlanillas');
     const tbody = document.getElementById('tbody-consolidado-asistencia');
     const cardResultado = document.getElementById('cardResultado');
     const lblRowCount = document.getElementById('lblRowCount');
     let lastExportPayload = null;
+    let lastRowsData = [];
     const STORAGE_KEY = 'asistencia.reporte_consolidado.state.v1';
 
     function setRowCount(n) {
         const num = Math.max(0, parseInt(n, 10) || 0);
         if (!lblRowCount) return;
         lblRowCount.textContent = String(num);
+    }
+
+    function setSelectedCount(n) {
+        const num = Math.max(0, parseInt(n, 10) || 0);
+        if (lblSelectedCount) lblSelectedCount.textContent = String(num);
+    }
+
+    function getSelectedRows() {
+        return Array.from(document.querySelectorAll('.chk-consolidado:checked')).map((chk) => ({
+            person: chk.value,
+            minutos: parseInt(chk.dataset.minutos || '0', 10) || 0,
+            name: chk.dataset.name || ''
+        }));
+    }
+
+    function updateSelectionUi() {
+        const checks = document.querySelectorAll('.chk-consolidado');
+        const selected = document.querySelectorAll('.chk-consolidado:checked').length;
+        setSelectedCount(selected);
+        if (chkAllConsolidado) {
+            chkAllConsolidado.indeterminate = selected > 0 && selected < checks.length;
+            chkAllConsolidado.checked = checks.length > 0 && selected === checks.length;
+        }
+    }
+
+    function resetSelection() {
+        if (chkAllConsolidado) {
+            chkAllConsolidado.checked = false;
+            chkAllConsolidado.indeterminate = false;
+        }
+        setSelectedCount(0);
     }
 
     function saveState(state) {
@@ -186,6 +283,11 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
     function pickTardanza(row) {
         return normalizeValue(row.tardanza != null ? row.tardanza : row.Tardanza);
+    }
+    function pickTardanzaMinutos(row) {
+        const raw = pickTardanza(row);
+        const n = parseInt(raw, 10);
+        return isNaN(n) ? 0 : Math.max(0, n);
     }
     function pickFaltas(row) {
         return normalizeValue(row.faltas != null ? row.faltas : row.Faltas);
@@ -244,15 +346,25 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     function renderRows(data) {
+        lastRowsData = Array.isArray(data) ? data.slice() : [];
         tbody.innerHTML = '';
+        resetSelection();
         data.forEach((row) => {
             const tr = document.createElement('tr');
             const faltasN = parseInt(pickFaltas(row), 10);
             if (!isNaN(faltasN) && faltasN > 0) {
                 tr.classList.add('fila-falta');
             }
+            const person = pickPerson(row);
+            const minutos = pickTardanzaMinutos(row);
             tr.innerHTML = `
-                <td class="sticky-col-1 font-monospace fw-bold text-center">${escapeHtml(pickPerson(row))}</td>
+                <td class="sticky-col-0">
+                    <input type="checkbox" class="form-check-input chk-consolidado"
+                        value="${escapeHtml(person)}"
+                        data-minutos="${minutos}"
+                        data-name="${escapeHtml(pickName(row))}">
+                </td>
+                <td class="sticky-col-1 font-monospace fw-bold text-center">${escapeHtml(person)}</td>
                 <td class="sticky-col-2 text-truncate">${escapeHtml(pickName(row))}</td>
                 <td class="text-end">${escapeHtml(formatMinutesHHMM(pickTardanza(row)))}</td>
                 <td class="text-end">${escapeHtml(pickFaltas(row))}</td>
@@ -260,6 +372,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             `;
             tbody.appendChild(tr);
         });
+        if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = data.length === 0;
     }
 
     function selectedText(selectEl) {
@@ -403,8 +516,11 @@ document.addEventListener('DOMContentLoaded', async function () {
         cardResultado.classList.add('d-none');
         tbody.innerHTML = '';
         setRowCount(0);
+        resetSelection();
         lastExportPayload = null;
+        lastRowsData = [];
         btnExportExcel.disabled = true;
+        if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = true;
         if (!cia) {
             cboTrabajador.innerHTML = '<option value="0">Todos</option>';
             cboTrabajador.disabled = true;
@@ -446,6 +562,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 setRowCount(0);
                 lastExportPayload = null;
                 btnExportExcel.disabled = true;
+                if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = true;
                 alert(data.error || 'Error al consultar el reporte.');
                 return;
             }
@@ -454,6 +571,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 setRowCount(0);
                 lastExportPayload = null;
                 btnExportExcel.disabled = true;
+                if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = true;
                 alert('Respuesta inválida del servidor.');
                 return;
             }
@@ -463,6 +581,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 setRowCount(0);
                 lastExportPayload = null;
                 btnExportExcel.disabled = true;
+                if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = true;
                 alert('No se encontraron registros para los filtros seleccionados.');
                 return;
             }
@@ -491,7 +610,156 @@ document.addEventListener('DOMContentLoaded', async function () {
             setRowCount(0);
             lastExportPayload = null;
             btnExportExcel.disabled = true;
+            if (btnRegistroPlanillas) btnRegistroPlanillas.disabled = true;
             alert('Error de red o del servidor.');
+        }
+    });
+
+    function prepararModalRegistroPlanillas(seleccionados, totalMin) {
+        mensajeRegistroPlanillas.className = 'alert small mb-0 d-none';
+        mensajeRegistroPlanillas.innerHTML = '';
+        cboPeriodoPlanilla.disabled = false;
+        btnConfirmarRegistroPlanillas.disabled = false;
+        btnConfirmarRegistroPlanillas.classList.remove('d-none');
+        resumenRegistroPlanillas.classList.remove('d-none');
+        resumenRegistroPlanillas.innerHTML =
+            '<strong>' + seleccionados.length + '</strong> trabajador(es) seleccionado(s). '
+            + 'Total minutos de tardanza a registrar: <strong>' + totalMin + '</strong>.';
+    }
+
+    function mostrarResultadoRegistroPlanillas(tipo, html) {
+        mensajeRegistroPlanillas.className = 'alert alert-' + tipo + ' small mb-0';
+        mensajeRegistroPlanillas.innerHTML = html;
+        mensajeRegistroPlanillas.classList.remove('d-none');
+    }
+
+    async function cargarPeriodosPlanilla(cia, fechafin) {
+        cboPeriodoPlanilla.innerHTML = '<option value="">Cargando...</option>';
+        let url = '/api/selectores/periodos-planilla?cia=' + encodeURIComponent(cia);
+        if (fechafin) {
+            url += '&fechafin=' + encodeURIComponent(fechafin);
+        }
+        const res = await fetch(url);
+        const json = await res.json();
+        const items = Array.isArray(json) ? json : (Array.isArray(json.data) ? json.data : []);
+        const defaultPeriod = Array.isArray(json) ? '' : String(json.default_period || '').trim();
+        cboPeriodoPlanilla.innerHTML = '<option value="">Seleccione periodo...</option>';
+        items.forEach((item) => {
+            const opt = document.createElement('option');
+            opt.value = String(item.id || '');
+            opt.textContent = String(item.text || item.id || '');
+            cboPeriodoPlanilla.appendChild(opt);
+        });
+        if (!items.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'Sin periodos disponibles';
+            cboPeriodoPlanilla.appendChild(opt);
+        } else if (defaultPeriod && optionExists(cboPeriodoPlanilla, defaultPeriod)) {
+            cboPeriodoPlanilla.value = defaultPeriod;
+        }
+        return items.length;
+    }
+
+    btnRegistroPlanillas.addEventListener('click', async function () {
+        const seleccionados = getSelectedRows();
+        if (!seleccionados.length) {
+            alert('Seleccione al menos un trabajador en el listado.');
+            return;
+        }
+        const cia = cboCompania.value.trim();
+        if (!cia) {
+            alert('Seleccione una compañía.');
+            return;
+        }
+        const totalMin = seleccionados.reduce((acc, r) => acc + (r.minutos || 0), 0);
+        prepararModalRegistroPlanillas(seleccionados, totalMin);
+        try {
+            const nPeriodos = await cargarPeriodosPlanilla(cia, txtFechaFin.value.trim());
+            if (!nPeriodos) {
+                alert('No hay periodos de planilla configurados para esta compañía.');
+            }
+            modalRegistroPlanillas.show();
+        } catch (err) {
+            console.error(err);
+            alert('No se pudieron cargar los periodos de planilla.');
+        }
+    });
+
+    if (chkAllConsolidado) {
+        chkAllConsolidado.addEventListener('change', function () {
+            document.querySelectorAll('.chk-consolidado').forEach((chk) => {
+                chk.checked = chkAllConsolidado.checked;
+            });
+            updateSelectionUi();
+        });
+    }
+
+    tbody.addEventListener('change', function (e) {
+        if (e.target && e.target.classList.contains('chk-consolidado')) {
+            updateSelectionUi();
+        }
+    });
+
+    formRegistroPlanillas.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const cia = cboCompania.value.trim();
+        const prperiod = cboPeriodoPlanilla.value.trim();
+        const seleccionados = getSelectedRows();
+        if (!cia || !prperiod) {
+            alert('Seleccione compañía y periodo de planilla.');
+            return;
+        }
+        if (!seleccionados.length) {
+            alert('Seleccione al menos un trabajador.');
+            return;
+        }
+        const btn = btnConfirmarRegistroPlanillas;
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/planillas/registro-tardanza', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cia,
+                    prperiod,
+                    trabajadores: seleccionados.map((r) => ({
+                        person: r.person,
+                        minutos: r.minutos
+                    }))
+                })
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.success) {
+                let msg = escapeHtml(json.error || 'No se pudo completar el registro.');
+                const errores = json.resumen && Array.isArray(json.resumen.errores) ? json.resumen.errores : [];
+                if (errores.length) {
+                    msg += '<br><br>' + errores.map((err) =>
+                        escapeHtml((err.name || err.person) + ': ' + (err.error || ''))
+                    ).join('<br>');
+                }
+                mostrarResultadoRegistroPlanillas('danger', msg);
+                return;
+            }
+            const resumen = json.resumen || {};
+            let msgOk = '<i class="bi bi-check-circle-fill me-1"></i><strong>Registro completado.</strong>';
+            if (resumen.insertados) msgOk += '<br>Nuevos: ' + resumen.insertados + '.';
+            if (resumen.actualizados) msgOk += '<br>Actualizados: ' + resumen.actualizados + '.';
+            const errores = Array.isArray(resumen.errores) ? resumen.errores : [];
+            if (errores.length) {
+                msgOk += '<br><br><span class="fw-bold">Con observaciones:</span><br>'
+                    + errores.map((err) =>
+                        escapeHtml((err.name || err.person) + ': ' + (err.error || ''))
+                    ).join('<br>');
+            }
+            cboPeriodoPlanilla.disabled = true;
+            btn.classList.add('d-none');
+            mostrarResultadoRegistroPlanillas('success', msgOk);
+        } catch (err) {
+            console.error(err);
+            mostrarResultadoRegistroPlanillas('danger', 'Error de red o del servidor.');
+        } finally {
+            btn.disabled = false;
         }
     });
 

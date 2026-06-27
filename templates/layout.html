@@ -229,14 +229,8 @@
             </div>
 
             <ul class="list-unstyled components">
-                <li class="{{ 'active' if request.endpoint == 'dashboard' else '' }}">
-                    <a href="{{ url_for('dashboard') }}" title="Dashboard">
-                        <i class="bi bi-speedometer2"></i><span class="sidebar-link-text">Dashboard</span>
-                    </a>
-                </li>
-
                 <li class="py-0">
-                    <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Configuración</p>
+                    <p class="sidebar-section-title px-3 mt-3 mb-0 text-uppercase fw-bold opacity-50">Configuración</p>
                 </li>
                 <li class="{{ 'active' if request.endpoint == 'maestro_horarios' else '' }}">
                     <a href="{{ url_for('maestro_horarios') }}" title="Maestro de Horarios">
