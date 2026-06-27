@@ -335,6 +335,7 @@ BEGIN
 
             IF @cant = 2
             BEGIN
+                SET @Salida = @SalidaRef;
                 SET @SalidaRef = NULL;
                 SET @RetornoRef = NULL;
             END;
