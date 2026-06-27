@@ -7,7 +7,7 @@
           PR_VacationDetail, PR_EmployeeMedicalRest, PR_MedicalRestType,
           CA_JustificacionPersona, CA_TipoJustificacion, SY_Person
 
-  Sin marcas: vacaciones -> descanso médico (PDT 20) -> justificación CA -> falta.
+  Sin marcas: vacaciones -> descanso médico (PDT 20) -> licencia con goce (PDT 26) -> justificación CA -> falta.
   RegistroAsistencia: solo marcas con estado = 'A' (activas). Las inactivas (I) se ignoran.
 */
 SET ANSI_NULLS ON;
@@ -201,6 +201,50 @@ BEGIN
                         ELSE 'DO'
                     END,
                     'Descanso Médico'
+                );
+            END
+            ELSE IF EXISTS (
+                SELECT 1
+                FROM PR_EmployeeMedicalRest emr
+                WHERE emr.Person = @person
+                  AND emr.Company = @cia
+                  AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
+                                                      AND CONVERT(DATE, emr.DateEnd)
+                  AND EXISTS (
+                      SELECT 1
+                      FROM PR_MedicalRestType mrt
+                      WHERE mrt.Company = @cia
+                        AND mrt.pdt = '26'
+                        AND mrt.MedicalRestType = emr.MedicalRestType
+                  )
+            )
+            BEGIN
+                SET @motivofalta = (
+                    SELECT TOP 1 mrt.Description
+                    FROM PR_EmployeeMedicalRest emr
+                    INNER JOIN PR_MedicalRestType mrt
+                        ON mrt.Company = @cia
+                       AND mrt.MedicalRestType = emr.MedicalRestType
+                       AND mrt.pdt = '26'
+                    WHERE emr.Person = @person
+                      AND emr.Company = @cia
+                      AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
+                                                          AND CONVERT(DATE, emr.DateEnd)
+                );
+
+                INSERT INTO ResumenAsistencia (
+                    Person, Company, Fecha, IdHorario, Entrada, Salida, SalidaRefri, EntradaRefri,
+                    MinutosTarde, MinutosAdicionales, Falta, XLastUser, XLastDate, DiaSem, motivo
+                )
+                VALUES (
+                    @person, @cia, @FechaProceso, @idhorario, NULL, NULL, NULL, NULL,
+                    0, 0, 'N', 'ADMIN', GETDATE(),
+                    CASE
+                        WHEN @dia = 2 THEN 'LU' WHEN @dia = 3 THEN 'MA' WHEN @dia = 4 THEN 'MI'
+                        WHEN @dia = 5 THEN 'JU' WHEN @dia = 6 THEN 'VI' WHEN @dia = 7 THEN 'SA'
+                        ELSE 'DO'
+                    END,
+                    ISNULL(@motivofalta, 'Licencia con goce de haber')
                 );
             END
             ELSE IF EXISTS (
