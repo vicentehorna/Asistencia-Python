@@ -1176,6 +1176,53 @@ def inactivar_registro_asistencia(cia, id_registro, xlastuser):
         return False, str(e)
 
 
+def eliminar_registro_asistencia(cia, id_registro):
+    """
+    Elimina permanentemente un registro de RegistroAsistencia.
+    Retorna (True, None) o (False, mensaje).
+    """
+    company_db = str(cia).strip()[:4]
+    if not company_db:
+        return False, "Compañía no válida."
+    try:
+        rid = int(id_registro)
+    except (TypeError, ValueError):
+        return False, "Registro no válido."
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM dbo.RegistroAsistencia
+            WHERE IdRegistro = ?
+              AND LTRIM(RTRIM(company)) = ?
+            """,
+            (rid, company_db),
+        )
+        if cursor.rowcount == 0:
+            cursor.close()
+            conn.close()
+            return False, "No se encontró la marca a eliminar."
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, None
+    except Exception as e:
+        print(f"Error en eliminar_registro_asistencia: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return False, str(e)
+
+
 def _format_time_for_input(val):
     """Normaliza time/timedelta/datetime a 'HH:MM' para input type=time."""
     if val is None:

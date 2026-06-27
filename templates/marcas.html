@@ -51,7 +51,7 @@
 
     .table-gestion-marcas .col-evidencia,
     .table-gestion-marcas .col-acciones {
-        width: 5.5rem;
+        width: 7.5rem;
         text-align: center;
         white-space: nowrap;
     }
@@ -630,12 +630,18 @@ function renderMarcasRows(rows, filters) {
             const dniAttr = escapeHtml(String(dni || ''));
             const fechaAttr = escapeHtml(String(fechaStr || ''));
             const horaAttr = escapeHtml(String(horaDisplay || ''));
-            accionHtml += '<button type="button" class="btn btn-link btn-sm text-danger p-0 btn-inactivar-marca" ' +
+            accionHtml += '<button type="button" class="btn btn-link btn-sm text-warning p-0 me-1 btn-inactivar-marca" ' +
                 'data-id="' + escapeHtml(String(idRegistro)) + '" ' +
                 'data-nombre="' + nomAttr + '" data-dni="' + dniAttr + '" ' +
                 'data-fecha="' + fechaAttr + '" data-hora="' + horaAttr + '" ' +
-                'title="Inactivar esta marca">' +
+                'title="Inactivar marca">' +
                 '<i class="bi bi-x-circle-fill fs-6"></i></button>';
+            accionHtml += '<button type="button" class="btn btn-link btn-sm text-danger p-0 btn-eliminar-marca" ' +
+                'data-id="' + escapeHtml(String(idRegistro)) + '" ' +
+                'data-nombre="' + nomAttr + '" data-dni="' + dniAttr + '" ' +
+                'data-fecha="' + fechaAttr + '" data-hora="' + horaAttr + '" ' +
+                'title="Eliminar marca">' +
+                '<i class="bi bi-trash fs-6"></i></button>';
         }
 
         const tr = document.createElement('tr');
@@ -672,7 +678,19 @@ function renderMarcasRows(rows, filters) {
                     dni: this.getAttribute('data-dni'),
                     fecha: this.getAttribute('data-fecha'),
                     hora: this.getAttribute('data-hora')
-                }, tr);
+                });
+            });
+        }
+        const btnEliminar = tr.querySelector('.btn-eliminar-marca');
+        if (btnEliminar) {
+            btnEliminar.addEventListener('click', function () {
+                eliminarMarca({
+                    id: this.getAttribute('data-id'),
+                    nombre: this.getAttribute('data-nombre'),
+                    dni: this.getAttribute('data-dni'),
+                    fecha: this.getAttribute('data-fecha'),
+                    hora: this.getAttribute('data-hora')
+                });
             });
         }
         tbody.appendChild(tr);
@@ -764,22 +782,39 @@ document.getElementById('btnExportMarcasExcel').addEventListener('click', async 
     }
 });
 
-async function inactivarMarca(info, tr) {
-    const cia = document.getElementById('cia').value;
-    const idRegistro = info && info.id;
-    if (!idRegistro || !cia) return;
-
-    const detalle = [
+function detalleMarcaConfirmacion(info) {
+    return [
         info.nombre ? String(info.nombre) : '',
         info.dni ? 'DNI ' + String(info.dni) : '',
         info.fecha ? String(info.fecha) : '',
         info.hora ? String(info.hora) : ''
     ].filter(Boolean).join(' · ');
+}
 
+function quitarMarcaDelListado(idRegistro) {
+    const idStr = String(idRegistro);
+    lastMarcasRowsRaw = lastMarcasRowsRaw.filter(function (row) {
+        return String(pickRow(row, ['IdRegistro', 'idregistro']) || '') !== idStr;
+    });
+    refreshMarcasListado();
+    saveMarcasState({ filters: lastMarcasFilters, rows: lastMarcasRowsRaw });
+    if (!lastMarcasRowsRaw.length) {
+        lastMarcasExcelPayload = null;
+        const btnExport = document.getElementById('btnExportMarcasExcel');
+        if (btnExport) btnExport.disabled = true;
+    }
+}
+
+async function inactivarMarca(info) {
+    const cia = document.getElementById('cia').value;
+    const idRegistro = info && info.id;
+    if (!idRegistro || !cia) return;
+
+    const detalle = detalleMarcaConfirmacion(info);
     const msg = detalle
         ? 'La siguiente marca se inactivará y dejará de mostrarse en el listado:\n\n' +
           detalle + '\n\n¿Desea confirmar la inactivación?'
-        : 'Esta marca se inactivará (estado = I) y dejará de mostrarse.\n\n¿Desea confirmar?';
+        : 'Esta marca se inactivará y dejará de mostrarse.\n\n¿Desea confirmar?';
 
     if (!window.confirm(msg)) return;
 
@@ -794,20 +829,41 @@ async function inactivarMarca(info, tr) {
             alert(data.error || 'No se pudo inactivar la marca.');
             return;
         }
-        const idStr = String(idRegistro);
-        lastMarcasRowsRaw = lastMarcasRowsRaw.filter(function (row) {
-            return String(pickRow(row, ['IdRegistro', 'idregistro']) || '') !== idStr;
-        });
-        refreshMarcasListado();
-        saveMarcasState({ filters: lastMarcasFilters, rows: lastMarcasRowsRaw });
-        if (!lastMarcasRowsRaw.length) {
-            lastMarcasExcelPayload = null;
-            const btnExport = document.getElementById('btnExportMarcasExcel');
-            if (btnExport) btnExport.disabled = true;
-        }
+        quitarMarcaDelListado(idRegistro);
     } catch (err) {
         console.error(err);
         alert('Error de red al inactivar la marca.');
+    }
+}
+
+async function eliminarMarca(info) {
+    const cia = document.getElementById('cia').value;
+    const idRegistro = info && info.id;
+    if (!idRegistro || !cia) return;
+
+    const detalle = detalleMarcaConfirmacion(info);
+    const msg = detalle
+        ? '¿Eliminar permanentemente la siguiente marca?\n\n' + detalle +
+          '\n\nEsta acción no se puede deshacer.'
+        : '¿Eliminar permanentemente esta marca?\n\nEsta acción no se puede deshacer.';
+
+    if (!window.confirm(msg)) return;
+
+    try {
+        const res = await fetch('/api/marcas/eliminar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cia: cia, idRegistro: idRegistro })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            alert(data.error || 'No se pudo eliminar la marca.');
+            return;
+        }
+        quitarMarcaDelListado(idRegistro);
+    } catch (err) {
+        console.error(err);
+        alert('Error de red al eliminar la marca.');
     }
 }
 
