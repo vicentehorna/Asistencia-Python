@@ -148,7 +148,6 @@
                         <th class="sticky-col-2">Nombre</th>
                         <th class="text-end">Tardanza (HH:MM)</th>
                         <th class="text-end">Faltas</th>
-                        <th class="text-end">Adic. (HH:MM)</th>
                     </tr>
                 </thead>
                 <tbody id="tbody-consolidado-asistencia"></tbody>
@@ -286,8 +285,17 @@ document.addEventListener('DOMContentLoaded', async function () {
             person: chk.value,
             minutos: parseInt(chk.dataset.minutos || '0', 10) || 0,
             name: chk.dataset.name || '',
-            faltas: parseInt(chk.dataset.faltas || '0', 10) || 0
+            faltas: parseInt(chk.dataset.faltas || '0', 10) || 0,
+            diasTardanza: parseInt(chk.dataset.diasTardanza || '0', 10) || 0
         }));
+    }
+
+    const UMBRAL_DIAS_TARDANZA_PLANILLA = 6;
+
+    function minutosParaImportarPlanilla(minutos, diasTardanza) {
+        const m = parseInt(minutos, 10) || 0;
+        const d = parseInt(diasTardanza, 10) || 0;
+        return d > UMBRAL_DIAS_TARDANZA_PLANILLA ? m * 3 : m;
     }
 
     function updateActionButtons() {
@@ -363,8 +371,11 @@ document.addEventListener('DOMContentLoaded', async function () {
     function pickFaltas(row) {
         return normalizeValue(row.faltas != null ? row.faltas : row.Faltas);
     }
-    function pickAdicional(row) {
-        return normalizeValue(row.adicional != null ? row.adicional : row.Adicional);
+    function pickDiasTardanza(row) {
+        const raw = row.diastardanza != null ? row.diastardanza
+            : (row.diasTardanza != null ? row.diasTardanza : row.DiasTardanza);
+        const n = parseInt(normalizeValue(raw), 10);
+        return isNaN(n) ? 0 : Math.max(0, n);
     }
 
     function formatMinutesHHMM(value) {
@@ -428,11 +439,13 @@ document.addEventListener('DOMContentLoaded', async function () {
             }
             const person = pickPerson(row);
             const minutos = pickTardanzaMinutos(row);
+            const diasTardanza = pickDiasTardanza(row);
             tr.innerHTML = `
                 <td class="sticky-col-0">
                     <input type="checkbox" class="form-check-input chk-consolidado"
                         value="${escapeHtml(person)}"
                         data-minutos="${minutos}"
+                        data-dias-tardanza="${diasTardanza}"
                         data-faltas="${isNaN(faltasN) ? 0 : faltasN}"
                         data-name="${escapeHtml(pickName(row))}">
                 </td>
@@ -440,7 +453,6 @@ document.addEventListener('DOMContentLoaded', async function () {
                 <td class="sticky-col-2 text-truncate">${escapeHtml(pickName(row))}</td>
                 <td class="text-end">${escapeHtml(formatMinutesHHMM(pickTardanza(row)))}</td>
                 <td class="text-end">${escapeHtml(pickFaltas(row))}</td>
-                <td class="text-end">${escapeHtml(formatMinutesHHMM(pickAdicional(row)))}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -466,7 +478,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             return;
         }
 
-        const header = ['PERSONA', 'NOMBRE', 'TARDANZA (HH:MM)', 'FALTAS', 'ADICIONALES (HH:MM)'];
+        const header = ['PERSONA', 'NOMBRE', 'TARDANZA (HH:MM)', 'FALTAS'];
         const wb = new ExcelJS.Workbook();
         const ws = wb.addWorksheet('Consolidado', { views: [{ showGridLines: true }] });
 
@@ -516,7 +528,6 @@ document.addEventListener('DOMContentLoaded', async function () {
                 pickName(row),
                 formatMinutesHHMM(pickTardanza(row)),
                 pickFaltas(row),
-                formatMinutesHHMM(pickAdicional(row)),
             ]);
             r.eachCell((cell, colNumber) => {
                 cell.border = allBorders;
@@ -535,7 +546,6 @@ document.addEventListener('DOMContentLoaded', async function () {
         ws.getColumn(2).width = 36;
         ws.getColumn(3).width = 16;
         ws.getColumn(4).width = 10;
-        ws.getColumn(5).width = 14;
 
         const buffer = await wb.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -688,16 +698,37 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     });
 
-    function prepararModalRegistroPlanillas(seleccionados, totalMin) {
+    function prepararModalRegistroPlanillas(seleccionados) {
         mensajeRegistroPlanillas.className = 'alert small mb-0 d-none';
         mensajeRegistroPlanillas.innerHTML = '';
         cboPeriodoPlanilla.disabled = false;
         btnConfirmarRegistroPlanillas.disabled = false;
         btnConfirmarRegistroPlanillas.classList.remove('d-none');
         resumenRegistroPlanillas.classList.remove('d-none');
+
+        let totalRegistro = 0;
+        const lineas = seleccionados.map((r) => {
+            const minutosReg = minutosParaImportarPlanilla(r.minutos, r.diasTardanza);
+            totalRegistro += minutosReg;
+            const etiqueta = escapeHtml(r.name || r.person);
+            if (r.diasTardanza > UMBRAL_DIAS_TARDANZA_PLANILLA) {
+                return '<li><strong>' + etiqueta + '</strong>: '
+                    + minutosReg + ' min. '
+                    + '(base ' + (r.minutos || 0) + ' min. × 3 por '
+                    + r.diasTardanza + ' días con tardanza)</li>';
+            }
+            return '<li><strong>' + etiqueta + '</strong>: ' + minutosReg + ' min.</li>';
+        });
+
         resumenRegistroPlanillas.innerHTML =
-            '<strong>' + seleccionados.length + '</strong> trabajador(es) seleccionado(s). '
-            + 'Total minutos de tardanza a registrar: <strong>' + totalMin + '</strong>.';
+            '<strong>' + seleccionados.length + '</strong> trabajador(es) seleccionado(s).<br>'
+            + 'Total minutos de tardanza a registrar: <strong>' + totalRegistro + '</strong>.'
+            + (lineas.length
+                ? '<ul class="mb-0 mt-2 ps-3 small">' + lineas.join('') + '</ul>'
+                : '')
+            + '<p class="small text-muted mb-0 mt-2">Si un trabajador tiene más de '
+            + UMBRAL_DIAS_TARDANZA_PLANILLA + ' días con tardanza en el rango, '
+            + 'sus minutos se multiplican por 3.</p>';
     }
 
     function mostrarResultadoRegistroPlanillas(tipo, html) {
@@ -745,8 +776,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             alert('Seleccione una compañía.');
             return;
         }
-        const totalMin = seleccionados.reduce((acc, r) => acc + (r.minutos || 0), 0);
-        prepararModalRegistroPlanillas(seleccionados, totalMin);
+        prepararModalRegistroPlanillas(seleccionados);
         try {
             const nPeriodos = await cargarPeriodosPlanilla(cia, txtFechaFin.value.trim());
             if (!nPeriodos) {
@@ -787,6 +817,12 @@ document.addEventListener('DOMContentLoaded', async function () {
             alert('Seleccione al menos un trabajador.');
             return;
         }
+        const fechaini = txtFechaIni.value.trim();
+        const fechafin = txtFechaFin.value.trim();
+        if (!fechaini || !fechafin) {
+            alert('Indique el rango de fechas del consolidado.');
+            return;
+        }
         const btn = btnConfirmarRegistroPlanillas;
         btn.disabled = true;
         try {
@@ -796,6 +832,8 @@ document.addEventListener('DOMContentLoaded', async function () {
                 body: JSON.stringify({
                     cia,
                     prperiod,
+                    fechaini,
+                    fechafin,
                     trabajadores: seleccionados.map((r) => ({
                         person: r.person,
                         minutos: r.minutos
@@ -818,6 +856,18 @@ document.addEventListener('DOMContentLoaded', async function () {
             let msgOk = '<i class="bi bi-check-circle-fill me-1"></i><strong>Registro completado.</strong>';
             if (resumen.insertados) msgOk += '<br>Nuevos: ' + resumen.insertados + '.';
             if (resumen.actualizados) msgOk += '<br>Actualizados: ' + resumen.actualizados + '.';
+            const multiplicados = Array.isArray(resumen.multiplicados) ? resumen.multiplicados : [];
+            if (multiplicados.length) {
+                msgOk += '<br><br><span class="fw-bold">Factor ×3 aplicado:</span><br>'
+                    + multiplicados.map((item) =>
+                        escapeHtml(
+                            (item.name || item.person) + ': '
+                            + (item.minutosBase != null ? item.minutosBase : '') + ' → '
+                            + (item.minutosRegistrados != null ? item.minutosRegistrados : '')
+                            + ' min. (' + (item.diasTardanza != null ? item.diasTardanza : '') + ' días)'
+                        )
+                    ).join('<br>');
+            }
             const errores = Array.isArray(resumen.errores) ? resumen.errores : [];
             if (errores.length) {
                 msgOk += '<br><br><span class="fw-bold">Con observaciones:</span><br>'

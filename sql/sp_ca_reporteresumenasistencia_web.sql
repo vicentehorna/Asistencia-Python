@@ -28,6 +28,7 @@ BEGIN
         EntradaRefri,
         Salida,
         CASE WHEN Falta = 'Y' THEN 'Si' ELSE 'No' END AS falta,
+        CASE WHEN ISNULL(MinutosTarde, 0) > 0 THEN 'Si' ELSE 'No' END AS tardanza,
         MinutosTarde AS minutostarde,
         motivo,
         MinutosAdicionales

@@ -124,6 +124,7 @@
                         <th class="text-center">E. ref.</th>
                         <th class="text-center">Salida</th>
                         <th class="text-center">Falta</th>
+                        <th class="text-center">Tardanza</th>
                         <th class="text-end">M. tarde</th>
                         <th class="text-end">M. adic.</th>
                         <th>Motivo</th>
@@ -193,6 +194,12 @@ document.addEventListener('DOMContentLoaded', async function () {
         return `${m[1].padStart(2, '0')}:${m[2]}`;
     };
     const esFalta = (v) => normalizeValue(v).toLowerCase() === 'si';
+    const pickTardanza = (row) => {
+        const directo = normalizeValue(row.tardanza != null ? row.tardanza : row.Tardanza);
+        if (directo) return directo;
+        const min = parseInt(normalizeValue(row.minutostarde), 10);
+        return !isNaN(min) && min > 0 ? 'Si' : 'No';
+    };
 
     function pickMinutosAdicionales(row) {
         if (!row || typeof row !== 'object') return '';
@@ -259,6 +266,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 <td class="text-center">${escapeHtml(formatHoraHHMM(row.entradarefri))}</td>
                 <td class="text-center">${escapeHtml(formatHoraHHMM(row.salida))}</td>
                 <td class="text-center">${escapeHtml(normalizeValue(row.falta))}</td>
+                <td class="text-center">${escapeHtml(pickTardanza(row))}</td>
                 <td class="text-end">${escapeHtml(normalizeValue(row.minutostarde))}</td>
                 <td class="text-end">${escapeHtml(madic)}</td>
                 <td>${escapeHtml(normalizeValue(row.motivo))}</td>
@@ -285,7 +293,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             return;
         }
 
-        const header = ['PERSONA', 'NOMBRE', 'FECHA', 'DÍA', 'HORARIO', 'ENTRADA', 'SALIDA REFRI', 'ENTRADA REFRI', 'SALIDA', 'FALTA', 'MIN. TARDE', 'MIN. ADIC.', 'MOTIVO'];
+        const header = ['PERSONA', 'NOMBRE', 'FECHA', 'DÍA', 'HORARIO', 'ENTRADA', 'SALIDA REFRI', 'ENTRADA REFRI', 'SALIDA', 'FALTA', 'TARDANZA', 'MIN. TARDE', 'MIN. ADIC.', 'MOTIVO'];
         const wb = new ExcelJS.Workbook();
         const ws = wb.addWorksheet('Resumen Asistencia', { views: [{ showGridLines: true }] });
 
@@ -330,6 +338,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         data.forEach((row) => {
             const falta = normalizeValue(row.falta);
+            const tardanza = pickTardanza(row);
             const madic = pickMinutosAdicionales(row);
             const r = ws.addRow([
                 normalizeValue(row.person),
@@ -342,6 +351,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 formatHoraHHMM(row.entradarefri),
                 formatHoraHHMM(row.salida),
                 falta,
+                tardanza,
                 normalizeValue(row.minutostarde),
                 madic,
                 normalizeValue(row.motivo),
@@ -350,9 +360,9 @@ document.addEventListener('DOMContentLoaded', async function () {
             r.eachCell((cell, colNumber) => {
                 cell.border = allBorders;
                 cell.fill = fill(isFalta ? 'FFFFF3CD' : 'FFFFFFFF');
-                if ([1, 3, 4, 6, 7, 8, 9, 10].includes(colNumber)) {
+                if ([1, 3, 4, 6, 7, 8, 9, 10, 11].includes(colNumber)) {
                     cell.alignment = { horizontal: 'center', vertical: 'middle' };
-                } else if (colNumber === 11 || colNumber === 12) {
+                } else if (colNumber === 12 || colNumber === 13) {
                     cell.alignment = { horizontal: 'right', vertical: 'middle' };
                 } else {
                     cell.alignment = { horizontal: 'left', vertical: 'middle' };
@@ -372,7 +382,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         ws.getColumn(10).width = 8;
         ws.getColumn(11).width = 10;
         ws.getColumn(12).width = 10;
-        ws.getColumn(13).width = 28;
+        ws.getColumn(13).width = 10;
+        ws.getColumn(14).width = 28;
 
         const buffer = await wb.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

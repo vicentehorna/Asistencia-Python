@@ -1950,7 +1950,36 @@ def _normalize_pr_period_yyyymmdd(period_raw):
     return str(period_raw or '').strip()
 
 
-def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
+def _count_dias_tardanza_rango(cursor, cia, person, fechaini, fechafin):
+    """Días del rango con MinutosTarde > 0 en ResumenAsistencia."""
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM ResumenAsistencia
+        WHERE LTRIM(RTRIM(Company)) = LTRIM(RTRIM(?))
+          AND LTRIM(RTRIM(Person)) = LTRIM(RTRIM(?))
+          AND CONVERT(DATE, Fecha) >= CONVERT(DATE, ?)
+          AND CONVERT(DATE, Fecha) <= CONVERT(DATE, ?)
+          AND ISNULL(MinutosTarde, 0) > 0
+        """,
+        (str(cia).strip()[:4], str(person).strip(), fechaini, fechafin),
+    )
+    row = cursor.fetchone()
+    try:
+        return int(row[0]) if row and row[0] is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _minutos_tardanza_para_planilla(minutos_base, dias_tardanza):
+    """Si hay más de 6 días con tardanza en el rango, triplica los minutos."""
+    minutos = int(minutos_base or 0)
+    if int(dias_tardanza or 0) > 6:
+        return minutos * 3
+    return minutos
+
+
+def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario, fechaini=None, fechafin=None):
     """
     Registra minutos de tardanza (MIN_TARDANZA) en PR_EmployeeConcept por trabajador.
     Usa sp_ca_registrartardanzaplanilla_web (un llamado por trabajador).
@@ -1969,6 +1998,7 @@ def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
     insertados = 0
     actualizados = 0
     errores = []
+    multiplicados = []
     try:
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
@@ -1980,10 +2010,20 @@ def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
             if not person:
                 continue
             try:
-                minutos = int(item.get('minutos') or 0)
+                minutos_base = int(item.get('minutos') or 0)
             except (TypeError, ValueError):
                 errores.append({'person': person, 'name': '', 'error': 'Minutos de tardanza inválidos.'})
                 continue
+
+            dias_tardanza = 0
+            minutos = minutos_base
+            factor_aplicado = False
+            if fechaini and fechafin:
+                dias_tardanza = _count_dias_tardanza_rango(
+                    cursor, cia, person, fechaini, fechafin
+                )
+                minutos = _minutos_tardanza_para_planilla(minutos_base, dias_tardanza)
+                factor_aplicado = dias_tardanza > 6
 
             cursor.execute(
                 """
@@ -2017,6 +2057,16 @@ def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
                     'name': nombre,
                     'error': mensaje or 'No se pudo registrar.',
                 })
+                continue
+
+            if factor_aplicado:
+                multiplicados.append({
+                    'person': person,
+                    'name': nombre,
+                    'diasTardanza': dias_tardanza,
+                    'minutosBase': minutos_base,
+                    'minutosRegistrados': minutos,
+                })
 
             while cursor.nextset():
                 pass
@@ -2027,6 +2077,7 @@ def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario):
             'actualizados': actualizados,
             'errores': errores,
             'procesados': insertados + actualizados,
+            'multiplicados': multiplicados,
         }
         if errores and (insertados + actualizados) == 0:
             return False, 'No se pudo registrar ningún trabajador.', resumen

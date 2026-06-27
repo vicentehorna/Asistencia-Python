@@ -1453,12 +1453,16 @@ def api_registro_tardanza_planilla():
     body = request.get_json(silent=True) or {}
     cia = (body.get('cia') or '').strip()
     prperiod = _normalize_pr_period(body.get('prperiod') or body.get('period'))
+    fechaini = (body.get('fechaini') or '').strip()
+    fechafin = (body.get('fechafin') or '').strip()
     trabajadores = body.get('trabajadores') if isinstance(body.get('trabajadores'), list) else []
 
     if not cia or cia not in _companias_permitidas_ids():
         return jsonify({"success": False, "error": "Compañía no válida."}), 400
     if not prperiod:
         return jsonify({"success": False, "error": "Seleccione el periodo de planilla."}), 400
+    if not fechaini or not fechafin:
+        return jsonify({"success": False, "error": "Indique el rango de fechas del consolidado."}), 400
     if not trabajadores:
         return jsonify({"success": False, "error": "Seleccione al menos un trabajador."}), 400
 
@@ -1484,7 +1488,9 @@ def api_registro_tardanza_planilla():
         or ''
     )[:20]
 
-    ok, err, resumen = registrar_tardanza_planilla(cia, prperiod, payload, usuario)
+    ok, err, resumen = registrar_tardanza_planilla(
+        cia, prperiod, payload, usuario, fechaini=fechaini, fechafin=fechafin
+    )
     if not ok:
         return jsonify({"success": False, "error": err, "resumen": resumen}), 400 if resumen else 500
     return jsonify({"success": True, "resumen": resumen})

@@ -21,6 +21,7 @@ BEGIN
         ResumenAsistencia.Person,
         SY_Person.Name,
         SUM(MinutosTarde) AS tardanza,
+        SUM(CASE WHEN ISNULL(MinutosTarde, 0) > 0 THEN 1 ELSE 0 END) AS diasTardanza,
         SUM(CASE WHEN Falta = 'Y' THEN 1 ELSE 0 END) AS faltas,
         SUM(MinutosAdicionales) AS Adicional
     FROM ResumenAsistencia
