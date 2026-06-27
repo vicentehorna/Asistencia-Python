@@ -9,6 +9,8 @@
 
   Sin marcas: vacaciones -> descanso médico (PDT 20) -> licencia con goce (PDT 26) -> justificación CA -> falta.
   RegistroAsistencia: solo marcas con estado = 'A' (activas). Las inactivas (I) se ignoran.
+  Con 2 marcas: la 2.ª es salida. Con 3 marcas: si la 3.ª está más cerca de la salida
+  teórica que del retorno de refrigerio, se toma como salida y E. refri queda vacía.
 */
 SET ANSI_NULLS ON;
 GO
@@ -32,6 +34,7 @@ BEGIN
     DECLARE @HingT TIME;
     DECLARE @HingR TIME;
     DECLARE @HsalidaT TIME;
+    DECLARE @HEntradaRefriT TIME;
     DECLARE @SalidaTeorica DATETIME;
     DECLARE @MinutosAdicionales INT;
     DECLARE @Entrada DATETIME;
@@ -56,6 +59,7 @@ BEGIN
         SET @HingT = NULL;
         SET @HingR = NULL;
         SET @HsalidaT = NULL;
+        SET @HEntradaRefriT = NULL;
         SET @SalidaTeorica = NULL;
         SET @MinutosAdicionales = 0;
         SET @Entrada = NULL;
@@ -134,6 +138,18 @@ BEGIN
             WHEN @dia = 6 THEN Viernes_Salida
             WHEN @dia = 7 THEN Sabado_Salida
             ELSE Domingo_Salida
+        END
+        FROM Horarios
+        WHERE IdHorario = @idhorario;
+
+        SELECT @HEntradaRefriT = CASE
+            WHEN @dia = 2 THEN Lunes_EntradaRefri
+            WHEN @dia = 3 THEN Martes_EntradaRefri
+            WHEN @dia = 4 THEN Miercoles_EntradaRefri
+            WHEN @dia = 5 THEN Jueves_EntradaRefri
+            WHEN @dia = 6 THEN Viernes_EntradaRefri
+            WHEN @dia = 7 THEN Sabado_EntradaRefri
+            ELSE Domingo_EntradaRefri
         END
         FROM Horarios
         WHERE IdHorario = @idhorario;
@@ -340,9 +356,19 @@ BEGIN
                 SET @RetornoRef = NULL;
             END;
 
+            IF @cant = 3
+               AND @RetornoRef IS NOT NULL
+               AND @HsalidaT IS NOT NULL
+               AND @HEntradaRefriT IS NOT NULL
+               AND ABS(DATEDIFF(MINUTE, @HsalidaT, CAST(@RetornoRef AS TIME)))
+                   <= ABS(DATEDIFF(MINUTE, @HEntradaRefriT, CAST(@RetornoRef AS TIME)))
+            BEGIN
+                SET @Salida = @RetornoRef;
+                SET @RetornoRef = NULL;
+            END;
+
             SET @MinutosAdicionales = 0;
-            IF @cant IN (2, 4)
-               AND @Salida IS NOT NULL
+            IF @Salida IS NOT NULL
                AND @HsalidaT IS NOT NULL
             BEGIN
                 SET @SalidaTeorica = DATETIMEFROMPARTS(
