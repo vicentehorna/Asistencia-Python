@@ -41,6 +41,7 @@ from database import (
     registrar_tardanza_planilla,
     get_faltas_regularizar,
     regularizar_faltas,
+    bind_client_database_for_request,
 )
 
 load_dotenv()
@@ -53,6 +54,10 @@ sys.stdout.reconfigure(line_buffering=True)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 login_manager.login_message_category = 'info'
+
+@app.before_request
+def _bind_db_router_request():
+    bind_client_database_for_request()
 
 
 def ensure_user_session():
@@ -164,9 +169,11 @@ def login():
 
 @app.route('/login', methods=['POST'])
 def login_post():
-    user = User.validate_user(request.form.get('username'), request.form.get('password'))
+    username = (request.form.get('username') or '').strip()
+    user = User.validate_user(username, request.form.get('password'))
     if user:
         login_user(user)
+        session['login_userid'] = username
         ensure_user_session()
         return redirect(url_for('maestro_horarios'))
     flash('Usuario o contraseña incorrectos.', 'error')

@@ -8,11 +8,148 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _use_db_router():
+    """Enrutamiento por USUARIOS_ROUTER_CA (hm_planillas)."""
+    val = (os.getenv('SQL_USE_DB_ROUTER') or 'Y').strip().upper()
+    return val not in ('N', '0', 'NO', 'FALSE')
+
+
+def get_router_database():
+    return (os.getenv('SQL_ROUTER_DATABASE') or 'hm_planillas').strip()
+
+
+def get_client_database_from_session():
+    try:
+        from flask import has_request_context, session
+        if has_request_context():
+            db = (session.get('client_database') or '').strip()
+            if db:
+                return db
+    except Exception:
+        pass
+    return None
+
+
+def persist_client_database(database):
+    try:
+        from flask import has_request_context, session
+        if has_request_context() and database:
+            session['client_database'] = str(database).strip()
+    except Exception:
+        pass
+
+
+def _login_username_for_router():
+    """UserID de login para USUARIOS_ROUTER_CA."""
+    try:
+        from flask import has_request_context, session
+        if has_request_context():
+            login_uid = (session.get('login_userid') or '').strip()
+            if login_uid:
+                return login_uid
+    except Exception:
+        pass
+    try:
+        from flask_login import current_user
+        if current_user.is_authenticated:
+            un = str(getattr(current_user, 'id', '') or '').strip()
+            if un:
+                return un
+    except Exception:
+        pass
+    return ''
+
+
+def _resolve_routed_database():
+    db = get_client_database_from_session()
+    if db:
+        return db
+    username = _login_username_for_router()
+    if username:
+        db = resolve_client_database(username)
+        if db:
+            persist_client_database(db)
+            return db
+    return None
+
+
+def bind_client_database_for_request():
+    """En cada request autenticado fija la BD activa según usuario."""
+    if not _use_db_router():
+        return
+    try:
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return
+        username = _login_username_for_router()
+        if not username:
+            return
+        db = resolve_client_database(username)
+        if db:
+            persist_client_database(db)
+    except Exception as e:
+        print(f"Error en bind_client_database_for_request: {e}")
+
+
+def get_active_database(*, required=False):
+    """BD activa de la sesión actual."""
+    if _use_db_router():
+        db = _resolve_routed_database()
+        if db:
+            return db
+        msg = (
+            'No se pudo resolver la base de datos del cliente desde USUARIOS_ROUTER_CA. '
+            'Cierre sesión y vuelva a ingresar.'
+        )
+        if required:
+            raise ValueError(msg)
+        return ''
+    db = (os.getenv('SQL_DATABASE') or '').strip()
+    if db:
+        return db
+    if required:
+        raise ValueError('No hay SQL_DATABASE configurada (modo local sin enrutador).')
+    return ''
+
+
+def resolve_client_database(username):
+    """
+    Resuelve la BD del usuario desde hm_planillas.USUARIOS_ROUTER_CA.
+    """
+    username = (username or '').strip()
+    if not username:
+        return None
+    if not _use_db_router():
+        return (os.getenv('SQL_DATABASE') or '').strip() or None
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection(database=get_router_database())
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT base_datos_name FROM USUARIOS_ROUTER_CA WHERE usuario = ?",
+            (username,),
+        )
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip()
+        return None
+    except Exception as e:
+        print(f"Error en resolve_client_database: {e}")
+        return None
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 class DatabaseConfig:
     """Configuración de conexión a SQL Server"""
     
     @staticmethod
-    def get_connection_string():
+    def get_connection_string(database=None):
         """Construye la cadena de conexión a SQL Server"""
         # server = '179.61.14.224,1433'
         # database = 'hm_ultra2'
@@ -20,7 +157,9 @@ class DatabaseConfig:
         # password = 'HMplanillas2020'
 
         server = os.getenv('SQL_SERVER')
-        database = os.getenv('SQL_DATABASE')
+        database = (database or '').strip()
+        if not database and not _use_db_router():
+            database = (os.getenv('SQL_DATABASE') or '').strip()
         username = os.getenv('SQL_USER')
         password = os.getenv('SQL_PASSWORD')
 
@@ -52,19 +191,27 @@ class DatabaseConfig:
         return connection_string
     
     @staticmethod
-    def get_connection():
+    def get_connection(database=None):
         """Crea y retorna una conexión a SQL Server"""
+        database = (database or get_active_database(required=True) or '').strip()
+        if not database:
+            raise ValueError(
+                'No hay base de datos configurada para esta conexión. '
+                'Con enrutador activo use USUARIOS_ROUTER_CA; en local defina SQL_DATABASE.'
+            )
         try:
-            conn = pyodbc.connect(DatabaseConfig.get_connection_string())
+            conn = pyodbc.connect(DatabaseConfig.get_connection_string(database=database))
             return conn
         except Exception as e:
             print(f"Error al conectar con SQL Server: {e}")
             raise
 
 
-def get_db_connection():
+def get_db_connection(database=None):
     """Conexión pyodbc reutilizable (APIs, reportes)."""
-    return DatabaseConfig.get_connection()
+    if database is None:
+        database = get_active_database(required=True)
+    return DatabaseConfig.get_connection(database=database)
 
 
 class User(UserMixin):
@@ -88,8 +235,18 @@ class User(UserMixin):
         Returns:
             User object si las credenciales son válidas, None en caso contrario
         """
+        username = (username or '').strip()
+        password = password or ''
+        if not username:
+            return None
+
+        target_db = resolve_client_database(username)
+        if not target_db:
+            print(f"DEBUG: Usuario '{username}' no encontrado en USUARIOS_ROUTER_CA")
+            return None
+
         try:
-            conn = DatabaseConfig.get_connection()
+            conn = DatabaseConfig.get_connection(database=target_db)
             cursor = conn.cursor()
             
             # Query para validar usuario y contraseña
@@ -119,6 +276,7 @@ class User(UserMixin):
             
             if row:
                 user_id, username_db, email, nombre = row
+                persist_client_database(target_db)
                 return User(user_id, username_db, email, nombre)
             
             return None
