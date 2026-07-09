@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_pr_listadomarcas_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_pr_listadomarcas_web]
     @cia          CHAR(4),
     @Fechainicio  DATETIME,
     @FechaFin     DATETIME,

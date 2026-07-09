@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_ca_selectorperiodosplanilla_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_ca_selectorperiodosplanilla_web]
     @cia VARCHAR(10)
 AS
 BEGIN

@@ -1,4 +1,5 @@
 import os
+import re
 import pyodbc
 import platform
 from flask_login import UserMixin
@@ -2370,6 +2371,127 @@ def regularizar_faltas(cia, person, fechas, comentario, usuario):
                 pass
         print(f"Error en regularizar_faltas: {e}")
         return False, str(e), None
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_lista_acceso_marcador(company):
+    """
+    Lista trabajadores activos con PIN y estado de biometría (sp_ca_listaaccesomarcador_web).
+    Retorna filas {person, name, pin_acceso, tiene_biometria, biometria_last_update,
+    biometria_status, biometria_template_bytes}.
+    """
+    cia = (company or '').strip()[:4]
+    if not cia:
+        return []
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("EXEC [dbo].[sp_ca_listaaccesomarcador_web] @cia=?", (cia,))
+        cols = [c[0] for c in cursor.description]
+        out = []
+        for row in cursor.fetchall():
+            d = dict(zip(cols, row))
+            lk = {str(k).lower(): v for k, v in d.items()}
+            tiene = lk.get('tienebiometria')
+            if isinstance(tiene, bytes):
+                tiene = bool(tiene[0]) if tiene else False
+            else:
+                tiene = bool(tiene)
+            out.append(
+                {
+                    'person': str(lk.get('person') or '').strip(),
+                    'name': (lk.get('name') or '') or '',
+                    'pin_acceso': str(lk.get('pinacceso') or '').strip(),
+                    'tiene_biometria': tiene,
+                    'biometria_last_update': lk.get('biometrialastupdate'),
+                    'biometria_status': str(lk.get('biometriastatus') or '').strip(),
+                    'biometria_template_bytes': lk.get('biometriatemplatebytes'),
+                }
+            )
+        cursor.close()
+        conn.close()
+        return out
+    except Exception as e:
+        print(f"Error en get_lista_acceso_marcador: {e}")
+        return []
+
+
+def actualizar_pin_marcador(company, person, pin, usuario):
+    """
+    Actualiza pinAcceso en SY_Person (sp_ca_actualizarpinmarcador_web).
+    Retorna (True, None) o (False, mensaje).
+    """
+    cia = (company or '').strip()[:4]
+    pers = (person or '').strip()[:20]
+    pin_val = (pin or '').strip()
+    user = (str(usuario) if usuario is not None else '')[:20]
+    if not cia or not pers:
+        return False, 'Compañía y trabajador son obligatorios.'
+    if not re.fullmatch(r'\d{4}', pin_val):
+        return False, 'El PIN debe tener exactamente 4 números.'
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_actualizarpinmarcador_web] @cia=?, @person=?, @pin=?, @usuario=?",
+            (cia, pers, pin_val, user),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, None
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        print(f"Error en actualizar_pin_marcador: {e}")
+        return False, str(e)
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def eliminar_biometria_marcador(company, person, usuario):
+    """
+    Elimina el registro biométrico en SY_Person_biometry (sp_ca_eliminarbiometriamarcador_web).
+    Retorna (True, None) o (False, mensaje).
+    """
+    cia = (company or '').strip()[:4]
+    pers = (person or '').strip()[:20]
+    user = (str(usuario) if usuario is not None else '')[:20]
+    if not cia or not pers:
+        return False, 'Compañía y trabajador son obligatorios.'
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC [dbo].[sp_ca_eliminarbiometriamarcador_web] @cia=?, @person=?, @usuario=?",
+            (cia, pers, user),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, None
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        print(f"Error en eliminar_biometria_marcador: {e}")
+        return False, str(e)
     finally:
         if conn:
             try:

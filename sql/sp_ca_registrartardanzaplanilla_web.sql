@@ -9,7 +9,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_ca_registrartardanzaplanilla_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_ca_registrartardanzaplanilla_web]
     @cia       VARCHAR(10),
     @prperiod  VARCHAR(10),
     @person    VARCHAR(20),

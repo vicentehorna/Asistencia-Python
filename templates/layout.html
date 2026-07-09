@@ -26,6 +26,13 @@
             background-color: #f8f9fa;
         }
 
+        .navbar-db-hint {
+            font-size: 0.65rem;
+            line-height: 1.15;
+            color: #6c757d;
+            opacity: 0.9;
+        }
+
         /* Sidebar Styling */
         #sidebar {
             width: var(--sidebar-width);
@@ -291,6 +298,15 @@
                     </a>
                 </li>
 
+                <li class="py-0">
+                    <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Seguridad</p>
+                </li>
+                <li class="{{ 'active' if request.endpoint == 'acceso_marcador' else '' }}">
+                    <a href="{{ url_for('acceso_marcador') }}" title="Acceso al Marcador">
+                        <i class="bi bi-shield-lock"></i><span class="sidebar-link-text">Acceso al Marcador</span>
+                    </a>
+                </li>
+
                 <hr class="mx-3 opacity-25 mt-4">
 
                 <li>
@@ -310,8 +326,11 @@
                     <span class="navbar-text fw-bold">
                         Bienvenido, {% if current_user.is_authenticated %}{{ current_user.nombre or current_user.username }}{% else %}Usuario{% endif %}
                     </span>
-                    <div class="ms-auto">
+                    <div class="ms-auto text-end">
                         <small class="text-muted">{{ now.strftime('%d/%m/%Y') if now else '' }}</small>
+                        {% if sql_database %}
+                        <div class="navbar-db-hint">{{ sql_database }}</div>
+                        {% endif %}
                     </div>
                 </div>
             </nav>

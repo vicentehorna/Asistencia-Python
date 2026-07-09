@@ -16,7 +16,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_ca_regularizarfaltas_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_ca_regularizarfaltas_web]
     @cia        CHAR(4),
     @person     VARCHAR(20),
     @fechas     NVARCHAR(MAX),

@@ -1,6 +1,7 @@
 import html
 import logging
 import os
+import re
 import smtplib
 import sys
 from datetime import date, datetime, time, timedelta
@@ -42,6 +43,10 @@ from database import (
     get_faltas_regularizar,
     regularizar_faltas,
     bind_client_database_for_request,
+    get_active_database,
+    get_lista_acceso_marcador,
+    actualizar_pin_marcador,
+    eliminar_biometria_marcador,
 )
 
 load_dotenv()
@@ -88,7 +93,12 @@ def format_pct(value):
 
 @app.context_processor
 def inject_now():
-    return {'now': datetime.now()}
+    sql_db = ''
+    try:
+        sql_db = get_active_database()
+    except Exception:
+        sql_db = ''
+    return {'now': datetime.now(), 'sql_database': sql_db}
 
 
 def _jsonable_value(value):
@@ -772,6 +782,104 @@ def configurar_alertas():
         companies=companies,
         default_company=default_company,
     )
+
+
+@app.route('/seguridad/acceso-marcador')
+@login_required
+def acceso_marcador():
+    ensure_user_session()
+    companies = get_companias_selector()
+    default_company = session.get('company') or ''
+    if companies and default_company:
+        ids = {str(c.get('id', '')).strip() for c in companies}
+        if str(default_company).strip() not in ids and companies:
+            default_company = companies[0].get('id', '')
+    return render_template(
+        'acceso_marcador.html',
+        companies=companies,
+        default_company=default_company,
+    )
+
+
+@app.route('/api/seguridad/acceso-marcador/lista', methods=['GET'])
+@login_required
+def api_lista_acceso_marcador():
+    cia = (request.args.get('cia') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
+    try:
+        rows = get_lista_acceso_marcador(cia)
+        data = []
+        for r in rows or []:
+            last_upd = r.get('biometria_last_update')
+            if isinstance(last_upd, datetime):
+                last_upd_fmt = last_upd.strftime('%d/%m/%Y %H:%M')
+            elif isinstance(last_upd, date):
+                last_upd_fmt = last_upd.strftime('%d/%m/%Y')
+            else:
+                last_upd_fmt = _jsonable_value(last_upd) or ''
+            data.append(
+                {
+                    "person": _jsonable_value(r.get('person')),
+                    "name": _jsonable_value(r.get('name')),
+                    "pin_acceso": _jsonable_value(r.get('pin_acceso')),
+                    "tiene_biometria": bool(r.get('tiene_biometria')),
+                    "biometria_last_update": last_upd_fmt,
+                    "biometria_status": _jsonable_value(r.get('biometria_status')),
+                    "biometria_template_bytes": _jsonable_value(r.get('biometria_template_bytes')),
+                }
+            )
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        logging.exception("api_lista_acceso_marcador")
+        return jsonify({"success": False, "error": str(e), "data": []}), 500
+
+
+@app.route('/api/seguridad/acceso-marcador/pin', methods=['POST'])
+@login_required
+def api_actualizar_pin_marcador():
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    person = (body.get('person') or '').strip()
+    pin = (body.get('pin') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not person:
+        return jsonify({"success": False, "error": "Indique el trabajador."}), 400
+    if not re.fullmatch(r'\d{4}', pin):
+        return jsonify({"success": False, "error": "El PIN debe tener exactamente 4 números."}), 400
+
+    usuario = str(
+        getattr(current_user, 'username', '')
+        or getattr(current_user, 'id', '')
+        or ''
+    )[:20]
+    ok, err = actualizar_pin_marcador(cia, person, pin, usuario)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": err or 'No se pudo actualizar el PIN.'}), 400
+
+
+@app.route('/api/seguridad/acceso-marcador/biometria', methods=['DELETE'])
+@login_required
+def api_eliminar_biometria_marcador():
+    body = request.get_json(silent=True) or {}
+    cia = (body.get('cia') or '').strip()
+    person = (body.get('person') or '').strip()
+    if not cia or cia not in _companias_permitidas_ids():
+        return jsonify({"success": False, "error": "Compañía no válida."}), 400
+    if not person:
+        return jsonify({"success": False, "error": "Indique el trabajador."}), 400
+
+    usuario = str(
+        getattr(current_user, 'username', '')
+        or getattr(current_user, 'id', '')
+        or ''
+    )[:20]
+    ok, err = eliminar_biometria_marcador(cia, person, usuario)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": err or 'No se pudo eliminar la biometría.'}), 400
 
 
 @app.route('/api/alertas/lista', methods=['GET'])

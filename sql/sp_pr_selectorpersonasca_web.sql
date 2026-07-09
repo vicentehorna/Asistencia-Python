@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_pr_selectorpersonasCA_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_pr_selectorpersonasCA_web]
     @cia       VARCHAR(4),
     @fechaini  DATETIME,
     @fechafin  DATETIME

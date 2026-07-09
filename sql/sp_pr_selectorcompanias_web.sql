@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_pr_selectorcompanias_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_pr_selectorcompanias_web]
 AS
 BEGIN
     SET NOCOUNT ON;

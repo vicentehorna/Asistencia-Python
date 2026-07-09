@@ -1,0 +1,354 @@
+{% extends "layout.html" %}
+
+{% block title %}Acceso al Marcador{% endblock %}
+
+{% block extra_css %}
+<style>
+    .table-scroll-container {
+        max-height: 68vh;
+        overflow: auto;
+        border: 1px solid #dee2e6;
+    }
+
+    .table-acceso-marcador {
+        font-size: 11px;
+        white-space: nowrap;
+        margin-bottom: 0;
+    }
+
+    .table-acceso-marcador th,
+    .table-acceso-marcador td {
+        padding: 0.35rem 0.5rem;
+        vertical-align: middle;
+    }
+
+    .table-acceso-marcador thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f8f9fa;
+        z-index: 2;
+        box-shadow: 0 1px 0 #dee2e6;
+        font-weight: 600;
+    }
+
+    .table-acceso-marcador .col-dni {
+        min-width: 6.5rem;
+        text-align: center;
+    }
+
+    .table-acceso-marcador .col-nombre {
+        min-width: 16rem;
+    }
+
+    .table-acceso-marcador .col-pin {
+        min-width: 5.5rem;
+        text-align: center;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        letter-spacing: 0.04em;
+    }
+
+    .table-acceso-marcador .col-bio {
+        min-width: 10rem;
+    }
+
+    .table-acceso-marcador .col-acciones {
+        min-width: 9rem;
+        text-align: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body pt-3">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <h4 class="mb-0 fw-bold">
+                    <i class="bi bi-shield-lock me-2 text-primary" aria-hidden="true"></i>Acceso al Marcador
+                </h4>
+                <span class="small text-muted">PIN y registro biométrico de trabajadores activos</span>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold text-muted" for="companySelector">Compañía</label>
+                    <select id="companySelector" class="form-select form-select-sm">
+                        {% for c in companies %}
+                        <option value="{{ c.id }}" {% if (c.id|string) == (default_company|string) %}selected{% endif %}>{{ c.text }}</option>
+                        {% else %}
+                        <option value="">Sin compañías disponibles</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-bold text-muted" for="filtroNombre">Buscar trabajador</label>
+                    <input type="search" id="filtroNombre" class="form-control form-control-sm" placeholder="Nombre o DNI…" autocomplete="off" inputmode="search">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button type="button" id="btnRecargar" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Consultar
+                    </button>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap align-items-center gap-3 small text-muted mt-3">
+                <span>Total: <strong id="countTotal">0</strong></span>
+                <span>Con biometría: <strong class="text-success" id="countBio">0</strong></span>
+                <span>Sin biometría: <strong class="text-secondary" id="countSinBio">0</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-scroll-container">
+                <table class="table table-bordered table-sm table-hover table-acceso-marcador align-middle mb-0" id="tablaAccesoMarcador">
+                    <thead>
+                        <tr>
+                            <th class="col-dni">DNI</th>
+                            <th class="col-nombre">Nombre</th>
+                            <th class="col-pin">PIN</th>
+                            <th class="col-bio">Biometría</th>
+                            <th class="col-acciones">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="listaAccesoBody">
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">Seleccione compañía y pulse Consultar.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalEditarPin" tabindex="-1" aria-labelledby="modalEditarPinLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalEditarPinLabel">Actualizar PIN</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2" id="modalPinTrabajador"></p>
+                <label class="form-label small fw-bold" for="inputNuevoPin">Nuevo PIN</label>
+                <input type="text" id="inputNuevoPin" class="form-control" maxlength="4" autocomplete="off" inputmode="numeric" pattern="[0-9]{4}">
+                <div class="form-text">PIN numérico de 4 dígitos.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnGuardarPin">
+                    <i class="bi bi-save me-1" aria-hidden="true"></i>Guardar PIN
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const $ = (id) => document.getElementById(id);
+    const selCia = $('companySelector');
+    const filtro = $('filtroNombre');
+    const body = $('listaAccesoBody');
+    const btnRecargar = $('btnRecargar');
+    const modalEl = $('modalEditarPin');
+    const modalPin = modalEl ? new bootstrap.Modal(modalEl) : null;
+    const inputNuevoPin = $('inputNuevoPin');
+    const btnGuardarPin = $('btnGuardarPin');
+
+    let rows = [];
+    let editPerson = null;
+    let editName = '';
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function esPinValido(pin) {
+        return /^\d{4}$/.test(String(pin || '').trim());
+    }
+
+    function actualizarEstadoGuardarPin() {
+        if (!btnGuardarPin) return;
+        btnGuardarPin.disabled = !esPinValido(inputNuevoPin.value);
+    }
+
+    function updateCounters(list) {
+        const total = list.length;
+        const conBio = list.filter((r) => r.tiene_biometria).length;
+        $('countTotal').textContent = String(total);
+        $('countBio').textContent = String(conBio);
+        $('countSinBio').textContent = String(total - conBio);
+    }
+
+    function filtrarRows() {
+        const q = (filtro.value || '').trim().toLowerCase();
+        if (!q) return rows.slice();
+        return rows.filter((r) => {
+            const blob = ((r.person || '') + ' ' + (r.name || '')).toLowerCase();
+            return blob.indexOf(q) >= 0;
+        });
+    }
+
+    function renderBioCell(row) {
+        if (!row.tiene_biometria) {
+            return '<span class="text-muted">Sin Registro</span>';
+        }
+        const status = row.biometria_status ? ' · Estado ' + escapeHtml(row.biometria_status) : '';
+        const fecha = row.biometria_last_update ? escapeHtml(row.biometria_last_update) : '—';
+        return '<span class="small">' + fecha + status + '</span>';
+    }
+
+    function renderRows(list) {
+        updateCounters(rows);
+        if (!list.length) {
+            body.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No hay trabajadores activos para mostrar.</td></tr>';
+            return;
+        }
+        body.innerHTML = list.map((r) => {
+            const person = escapeHtml(r.person);
+            const name = escapeHtml(r.name);
+            const pin = escapeHtml(r.pin_acceso || '—');
+            const btnPin = '<button type="button" class="btn btn-outline-primary btn-sm py-0 px-2 btn-edit-pin" data-person="' + person + '" data-name="' + name + '" data-pin="' + pin + '" title="Actualizar PIN"><i class="bi bi-pencil-square"></i></button>';
+            const btnBio = r.tiene_biometria
+                ? '<button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 ms-1 btn-del-bio" data-person="' + person + '" data-name="' + name + '" title="Eliminar biometría"><i class="bi bi-trash3"></i></button>'
+                : '<button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 ms-1" disabled title="Sin registro biométrico"><i class="bi bi-trash3"></i></button>';
+            return '<tr data-person="' + person + '">'
+                + '<td class="col-dni">' + person + '</td>'
+                + '<td class="col-nombre">' + name + '</td>'
+                + '<td class="col-pin">' + pin + '</td>'
+                + '<td class="col-bio">' + renderBioCell(r) + '</td>'
+                + '<td class="col-acciones">' + btnPin + btnBio + '</td>'
+                + '</tr>';
+        }).join('');
+    }
+
+    async function cargarLista() {
+        const cia = (selCia.value || '').trim();
+        if (!cia) {
+            alert('Seleccione una compañía.');
+            return;
+        }
+        btnRecargar.disabled = true;
+        body.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+        try {
+            const res = await fetch('/api/seguridad/acceso-marcador/lista?cia=' + encodeURIComponent(cia));
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+                rows = [];
+                renderRows([]);
+                alert(json.error || 'No se pudo cargar el listado.');
+                return;
+            }
+            rows = Array.isArray(json.data) ? json.data : [];
+            renderRows(filtrarRows());
+        } catch (e) {
+            console.error(e);
+            rows = [];
+            renderRows([]);
+            alert('Error de red al cargar el listado.');
+        } finally {
+            btnRecargar.disabled = false;
+        }
+    }
+
+    function abrirModalPin(person, name, pin) {
+        editPerson = person;
+        editName = name;
+        $('modalPinTrabajador').textContent = person + ' — ' + name;
+        inputNuevoPin.value = pin === '—' ? '' : pin;
+        actualizarEstadoGuardarPin();
+        if (modalPin) modalPin.show();
+        setTimeout(function () { inputNuevoPin.focus(); inputNuevoPin.select(); }, 200);
+    }
+
+    async function guardarPin() {
+        const cia = (selCia.value || '').trim();
+        const pin = (inputNuevoPin.value || '').trim();
+        if (!editPerson) return;
+        if (!esPinValido(pin)) {
+            alert('El PIN debe tener exactamente 4 números.');
+            return;
+        }
+        btnGuardarPin.disabled = true;
+        try {
+            const res = await fetch('/api/seguridad/acceso-marcador/pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cia: cia, person: editPerson, pin: pin }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+                alert(json.error || 'No se pudo actualizar el PIN.');
+                return;
+            }
+            if (modalPin) modalPin.hide();
+            await cargarLista();
+        } catch (e) {
+            console.error(e);
+            alert('Error de red al guardar el PIN.');
+        } finally {
+            actualizarEstadoGuardarPin();
+        }
+    }
+
+    async function eliminarBiometria(person, name) {
+        const cia = (selCia.value || '').trim();
+        const msg = '¿Eliminar el registro biométrico de ' + person + ' — ' + name + '?\n\nLa persona deberá volver a enrolarse en el marcador.';
+        if (!window.confirm(msg)) return;
+        try {
+            const res = await fetch('/api/seguridad/acceso-marcador/biometria', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cia: cia, person: person }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+                alert(json.error || 'No se pudo eliminar la biometría.');
+                return;
+            }
+            await cargarLista();
+        } catch (e) {
+            console.error(e);
+            alert('Error de red al eliminar la biometría.');
+        }
+    }
+
+    body.addEventListener('click', function (ev) {
+        const btnPin = ev.target.closest('.btn-edit-pin');
+        if (btnPin) {
+            abrirModalPin(btnPin.dataset.person || '', btnPin.dataset.name || '', btnPin.dataset.pin || '');
+            return;
+        }
+        const btnBio = ev.target.closest('.btn-del-bio');
+        if (btnBio) {
+            eliminarBiometria(btnBio.dataset.person || '', btnBio.dataset.name || '');
+        }
+    });
+
+    btnRecargar.addEventListener('click', cargarLista);
+    btnGuardarPin.addEventListener('click', guardarPin);
+    inputNuevoPin.addEventListener('input', function () {
+        inputNuevoPin.value = inputNuevoPin.value.replace(/\D/g, '').slice(0, 4);
+        actualizarEstadoGuardarPin();
+    });
+    filtro.addEventListener('input', function () { renderRows(filtrarRows()); });
+    selCia.addEventListener('change', function () {
+        rows = [];
+        renderRows([]);
+    });
+
+    if (selCia.value) {
+        cargarLista();
+    }
+})();
+</script>
+{% endblock %}

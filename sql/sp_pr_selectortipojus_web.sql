@@ -3,8 +3,12 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-create procedure [dbo].[sp_pr_selectortipojus_web]
-as
-begin
-    select idjustificacion, descripcion, abreviatura from ca_tipojustificacion
+CREATE OR CREATE OR ALTER PROCEDURE [dbo].[sp_pr_selectortipojus_web]
+
+as
+
+begin
+
+    select idjustificacion, descripcion, abreviatura from ca_tipojustificacion
+
 end

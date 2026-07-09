@@ -12,6 +12,6 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
--- TODO: pegar aquí la definición ALTER PROCEDURE desde SQL Server
+-- TODO: pegar aquí la definición CREATE OR ALTER PROCEDURE desde SQL Server
 -- EXEC sp_pr_CambiarPassword_web @userid, @clave_ant, @clave_nueva
 GO

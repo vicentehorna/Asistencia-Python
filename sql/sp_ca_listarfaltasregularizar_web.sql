@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_ca_listarfaltasregularizar_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_ca_listarfaltasregularizar_web]
     @cia       CHAR(4),
     @person    VARCHAR(20),
     @fechaini  DATETIME,

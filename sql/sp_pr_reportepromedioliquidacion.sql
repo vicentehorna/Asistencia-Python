@@ -12,6 +12,6 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
--- TODO: pegar aquí la definición ALTER PROCEDURE desde SQL Server
+-- TODO: pegar aquí la definición CREATE OR ALTER PROCEDURE desde SQL Server
 -- EXEC SP_PR_ReportePromedioLiquidacion @cia, @payrolltype, @period, @person
 GO

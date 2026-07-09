@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_pr_listaenvioalertas_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_pr_listaenvioalertas_web]
     @cia VARCHAR(4)
 AS
 BEGIN

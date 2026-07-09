@@ -8,7 +8,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-ALTER PROCEDURE [dbo].[sp_ca_validarmarcasimpares_web]
+CREATE OR ALTER PROCEDURE [dbo].[sp_ca_validarmarcasimpares_web]
     @cia       CHAR(4),
     @fechaini  DATETIME,
     @fechafin  DATETIME
