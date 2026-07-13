@@ -50,11 +50,54 @@
         }
 
         #sidebar .sidebar-header {
-            padding: 20px 44px 20px 20px;
-            background: rgba(0,0,0,0.1);
+            padding: 14px 36px 12px 36px;
+            background: transparent;
             text-align: center;
             position: relative;
             flex-shrink: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #sidebar .sidebar-brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 220px;
+            margin: 0 auto;
+        }
+
+        #sidebar .sidebar-logo {
+            display: block;
+            width: auto;
+            max-width: 168px;
+            height: auto;
+            max-height: 72px;
+            margin: 0 auto;
+            object-fit: contain;
+            object-position: center center;
+        }
+
+        #sidebar .sidebar-logo-icon {
+            display: none;
+        }
+
+        #sidebar .sidebar-brand-tagline {
+            width: 100%;
+            margin: 6px 0 0;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.35);
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            line-height: 1.25;
+            text-transform: uppercase;
+            color: #ffffff;
+            text-align: center;
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
         }
 
         #sidebar .sidebar-collapse-btn {
@@ -89,19 +132,23 @@
             transform: rotate(180deg);
         }
 
-        #sidebar .sidebar-header h4 {
-            margin: 0;
-            padding-right: 36px;
-            color: #fff;
-            font-weight: 600;
-        }
-
         body.sidebar-collapsed #sidebar .sidebar-header {
-            padding: 14px 8px;
+            padding: 12px 6px;
         }
 
-        body.sidebar-collapsed #sidebar .sidebar-header h4 {
-            padding-right: 0;
+        body.sidebar-collapsed #sidebar .sidebar-brand-tagline {
+            display: none;
+        }
+
+        body.sidebar-collapsed #sidebar .sidebar-logo {
+            display: none;
+        }
+
+        body.sidebar-collapsed #sidebar .sidebar-logo-icon {
+            display: block;
+            max-height: 44px;
+            max-width: 52px;
+            object-position: top center;
         }
 
         body.sidebar-collapsed #sidebar .sidebar-collapse-btn {
@@ -191,6 +238,20 @@
             margin-left: var(--sidebar-width);
             transition: margin-left 0.3s ease, width 0.3s ease;
             min-height: 100vh;
+            background-color: #f8f9fa;
+            background-image:
+                linear-gradient(rgba(248, 249, 250, 0.55), rgba(248, 249, 250, 0.55)),
+                url("{{ url_for('static', filename='img/fondo_area_trabajo.png') }}");
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+        }
+
+        @media (max-width: 768px) {
+            #content {
+                background-image: none;
+            }
         }
 
         body.sidebar-collapsed #content {
@@ -229,7 +290,11 @@
     <div class="wrapper d-flex">
         <nav id="sidebar" aria-label="Navegación de Asistencia">
             <div class="sidebar-header">
-                <h4 class="mb-0"><span class="sidebar-link-text">Asistencia</span></h4>
+                <div class="sidebar-brand">
+                    <img src="{{ url_for('static', filename='img/LogoHM_sidebar_mark.png') }}" alt="HM" class="sidebar-logo">
+                    <img src="{{ url_for('static', filename='img/LogoHM_sidebar_icon.png') }}" alt="HM" class="sidebar-logo-icon">
+                    <p class="sidebar-brand-tagline mb-0">Consultoría Empresarial</p>
+                </div>
                 <button type="button" class="sidebar-collapse-btn d-none d-md-inline-flex" id="sidebarCollapseBtn" aria-label="Contraer menú" aria-expanded="true">
                     <i class="bi bi-chevron-left" aria-hidden="true"></i>
                 </button>

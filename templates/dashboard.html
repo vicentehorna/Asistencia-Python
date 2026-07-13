@@ -18,9 +18,9 @@
 {% block content %}
 <div class="container-fluid py-4">
     <div class="dashboard-welcome">
-        <h2 class="mb-2 fw-bold">Bienvenido, {{ current_user.username }}</h2>
+        <h2 class="mb-2 fw-bold">Bienvenido, {{ current_user.nombre or current_user.username }}</h2>
         <p class="mb-0 opacity-75">
-            Portal Asistencia. Usa el mismo servidor y base de datos que Planillas. Las opciones del menú se irán agregando paso a paso.
+            Portal Asistencia. Las acciones del menú lateral se irán habilitando conforme avance el proyecto.
         </p>
     </div>
 </div>

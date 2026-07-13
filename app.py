@@ -173,7 +173,7 @@ def load_user(user_id):
 @app.route('/')
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('maestro_horarios'))
+        return redirect(url_for('dashboard'))
     return render_template('login.html')
 
 
@@ -185,7 +185,7 @@ def login_post():
         login_user(user)
         session['login_userid'] = username
         ensure_user_session()
-        return redirect(url_for('maestro_horarios'))
+        return redirect(url_for('dashboard'))
     flash('Usuario o contraseña incorrectos.', 'error')
     return redirect(url_for('login'))
 
@@ -219,7 +219,8 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return redirect(url_for('maestro_horarios'))
+    ensure_user_session()
+    return render_template('dashboard.html')
 
 
 def _en_desarrollo(titulo):
