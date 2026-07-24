@@ -108,6 +108,10 @@
 <script>
 (function () {
     const DEFAULTS = { entrada: '08:30', salidaRefri: '13:00', entradaRefri: '14:00', salida: '16:00' };
+    /** true = formulario limpio para INSERT; no auto-seleccionar el primer horario de la lista */
+    let modoNuevo = false;
+    /** invalida respuestas async de cargarHorario al pulsar Nuevo */
+    let cargaSeq = 0;
 
     function escapeHtml(s) {
         return String(s == null ? '' : s)
@@ -184,9 +188,12 @@
     window.cargarHorario = async function (id) {
         const cia = getCia();
         if (!cia || !id) return;
+        modoNuevo = false;
+        const seq = ++cargaSeq;
         try {
             const res = await fetch('/api/horarios/' + encodeURIComponent(id) + '?cia=' + encodeURIComponent(cia));
             const data = await res.json();
+            if (seq !== cargaSeq) return;
             if (!res.ok) {
                 alert(data.error || 'No se pudo cargar el horario.');
                 return;
@@ -208,12 +215,15 @@
             });
             marcarActivoLista(id);
         } catch (e) {
+            if (seq !== cargaSeq) return;
             console.error(e);
             alert('Error de red al cargar el horario.');
         }
     };
 
     window.nuevoHorario = function () {
+        modoNuevo = true;
+        cargaSeq += 1;
         document.getElementById('idHorario').value = '';
         document.getElementById('nombreHorario').value = '';
         document.getElementById('tolerancia').value = '0';
@@ -242,15 +252,25 @@
         try {
             const res = await fetch('/api/horarios/lista?cia=' + encodeURIComponent(cia));
             const items = await res.json();
-            renderListaHorarios(Array.isArray(items) ? items : []);
+            const list = Array.isArray(items) ? items : [];
+            renderListaHorarios(list);
+
+            // En modo creación solo refrescar la lista; no cargar el primer horario
+            if (modoNuevo) {
+                document.querySelectorAll('.list-item-horario').forEach(function (el) {
+                    el.classList.remove('active-horario');
+                });
+                return;
+            }
+
             const currentId = document.getElementById('idHorario').value.trim();
-            if (currentId && items.some(function (h) {
+            if (currentId && list.some(function (h) {
                 const id = h.IdHorario != null ? h.IdHorario : h.idHorario;
                 return String(id) === String(currentId);
             })) {
                 await cargarHorario(Number(currentId));
-            } else if (items.length) {
-                const first = items[0];
+            } else if (list.length) {
+                const first = list[0];
                 const fid = first.IdHorario != null ? first.IdHorario : first.idHorario;
                 await cargarHorario(Number(fid));
             } else {
@@ -267,7 +287,9 @@
         const sel = document.getElementById('companySelector');
         if (sel) {
             sel.addEventListener('change', function () {
-                nuevoHorario();
+                // Al cambiar compañía se muestra el primer horario (o formulario vacío)
+                modoNuevo = false;
+                document.getElementById('idHorario').value = '';
                 recargarListaYSeleccion();
             });
         }
@@ -323,6 +345,7 @@
             });
             const result = await response.json();
             if (response.ok && result.success) {
+                modoNuevo = false;
                 if (result.id != null) {
                     document.getElementById('idHorario').value = String(result.id);
                 }

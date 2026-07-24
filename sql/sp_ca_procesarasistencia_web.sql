@@ -3,11 +3,13 @@
   Uso: Procesar Asistencia — botón Iniciar Proceso (api/asistencia/procesar_individual)
   Parámetros: @cia, @person, @fechaini, @fechafin
 
-  Tablas: ResumenAsistencia, AsignacionHorarios, Horarios, SY_Holiday, RegistroAsistencia,
-          PR_VacationDetail, PR_EmployeeMedicalRest, PR_MedicalRestType,
+  Tablas: ResumenAsistencia, AsignacionHorarios, Horarios, SY_Holiday, CA_Feriados,
+          RegistroAsistencia, PR_VacationDetail, PR_EmployeeMedicalRest, PR_MedicalRestType,
           CA_JustificacionPersona, CA_TipoJustificacion, SY_Person
 
-  Sin marcas: vacaciones -> descanso médico (PDT 20) -> licencia con goce (PDT 26) -> justificación CA -> falta.
+  Feriados (SY_Holiday Status=A o CA_Feriados): se registran en resumen con Falta='N' y Motivo='Feriado'.
+  Sin marcas: vacaciones -> descanso médico/incapacidad/licencia (PDT 16,20,21,22,26) -> justificación CA -> falta.
+  Sin asignación de horario vigente en el día: no se genera fila en el resumen.
   RegistroAsistencia: solo marcas con estado = 'A' (activas). Las inactivas (I) se ignoran.
   Con 2 marcas: la 2.ª es salida. Con 3 marcas: si la 3.ª está más cerca de la salida
   teórica que del retorno de refrigerio, se toma como salida y E. refri queda vacía.
@@ -80,17 +82,6 @@ BEGIN
             CONTINUE;
         END;
 
-        IF EXISTS (
-            SELECT 1
-            FROM SY_Holiday
-            WHERE HolidayDate = @FechaProceso
-              AND Status = 'A'
-        )
-        BEGIN
-            SET @FechaProceso = DATEADD(DAY, 1, @FechaProceso);
-            CONTINUE;
-        END;
-
         SELECT TOP 1
             @idhorario = IdHorario
         FROM AsignacionHorarios
@@ -114,6 +105,42 @@ BEGIN
             WHERE IdHorario = @idhorario
         ) = 0
         BEGIN
+            SET @FechaProceso = DATEADD(DAY, 1, @FechaProceso);
+            CONTINUE;
+        END;
+
+        /* Feriado: aparece en resumen, no es falta (CA_Feriados o SY_Holiday). */
+        IF EXISTS (
+            SELECT 1
+            FROM SY_Holiday
+            WHERE CONVERT(DATE, HolidayDate) = CONVERT(DATE, @FechaProceso)
+              AND Status = 'A'
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM CA_Feriados
+            WHERE CONVERT(DATE, Fecha) = CONVERT(DATE, @FechaProceso)
+        )
+        BEGIN
+            INSERT INTO ResumenAsistencia (
+                Person, Company, Fecha, IdHorario, Entrada, Salida, SalidaRefri, EntradaRefri,
+                MinutosTarde, MinutosAdicionales, Falta, XLastUser, XLastDate, DiaSem, motivo
+            )
+            VALUES (
+                @person, @cia, @FechaProceso, @idhorario, NULL, NULL, NULL, NULL,
+                0, 0, 'N', 'ADMIN', GETDATE(),
+                CASE
+                    WHEN @dia = 2 THEN 'LU' WHEN @dia = 3 THEN 'MA' WHEN @dia = 4 THEN 'MI'
+                    WHEN @dia = 5 THEN 'JU' WHEN @dia = 6 THEN 'VI' WHEN @dia = 7 THEN 'SA'
+                    ELSE 'DO'
+                END,
+                'Feriado'
+            );
+
+            UPDATE SY_Person
+            SET FechaProcesamientoCA = GETDATE()
+            WHERE Person = @person;
+
             SET @FechaProceso = DATEADD(DAY, 1, @FechaProceso);
             CONTINUE;
         END;
@@ -191,61 +218,36 @@ BEGIN
             ELSE IF EXISTS (
                 SELECT 1
                 FROM PR_EmployeeMedicalRest emr
+                INNER JOIN PR_MedicalRestType mrt
+                    ON mrt.Company = @cia
+                   AND mrt.MedicalRestType = emr.MedicalRestType
                 WHERE emr.Person = @person
                   AND emr.Company = @cia
                   AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
                                                       AND CONVERT(DATE, emr.DateEnd)
-                  AND EXISTS (
-                      SELECT 1
-                      FROM PR_MedicalRestType mrt
-                      WHERE mrt.Company = @cia
-                        AND mrt.pdt = '20'
-                        AND mrt.MedicalRestType = emr.MedicalRestType
-                  )
-            )
-            BEGIN
-                INSERT INTO ResumenAsistencia (
-                    Person, Company, Fecha, IdHorario, Entrada, Salida, SalidaRefri, EntradaRefri,
-                    MinutosTarde, MinutosAdicionales, Falta, XLastUser, XLastDate, DiaSem, motivo
-                )
-                VALUES (
-                    @person, @cia, @FechaProceso, @idhorario, NULL, NULL, NULL, NULL,
-                    0, 0, 'N', 'ADMIN', GETDATE(),
-                    CASE
-                        WHEN @dia = 2 THEN 'LU' WHEN @dia = 3 THEN 'MA' WHEN @dia = 4 THEN 'MI'
-                        WHEN @dia = 5 THEN 'JU' WHEN @dia = 6 THEN 'VI' WHEN @dia = 7 THEN 'SA'
-                        ELSE 'DO'
-                    END,
-                    'Descanso Médico'
-                );
-            END
-            ELSE IF EXISTS (
-                SELECT 1
-                FROM PR_EmployeeMedicalRest emr
-                WHERE emr.Person = @person
-                  AND emr.Company = @cia
-                  AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
-                                                      AND CONVERT(DATE, emr.DateEnd)
-                  AND EXISTS (
-                      SELECT 1
-                      FROM PR_MedicalRestType mrt
-                      WHERE mrt.Company = @cia
-                        AND mrt.pdt = '26'
-                        AND mrt.MedicalRestType = emr.MedicalRestType
-                  )
+                  AND LTRIM(RTRIM(mrt.pdt)) IN ('16', '20', '21', '22', '26')
             )
             BEGIN
                 SET @motivofalta = (
-                    SELECT TOP 1 mrt.Description
+                    SELECT TOP 1
+                        CASE LTRIM(RTRIM(mrt.pdt))
+                            WHEN '16' THEN 'Invalidez Temporal'
+                            WHEN '20' THEN 'Descanso Médico'
+                            WHEN '21' THEN 'Incapacidad Temp.'
+                            WHEN '22' THEN 'Descanso Maternidad'
+                            WHEN '26' THEN 'Licencia con goce'
+                            ELSE LEFT(ISNULL(mrt.Description, 'Licencia'), 20)
+                        END
                     FROM PR_EmployeeMedicalRest emr
                     INNER JOIN PR_MedicalRestType mrt
                         ON mrt.Company = @cia
                        AND mrt.MedicalRestType = emr.MedicalRestType
-                       AND mrt.pdt = '26'
                     WHERE emr.Person = @person
                       AND emr.Company = @cia
                       AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
                                                           AND CONVERT(DATE, emr.DateEnd)
+                      AND LTRIM(RTRIM(mrt.pdt)) IN ('16', '20', '21', '22', '26')
+                    ORDER BY emr.DateBegin DESC, emr.line DESC
                 );
 
                 INSERT INTO ResumenAsistencia (
@@ -260,7 +262,7 @@ BEGIN
                         WHEN @dia = 5 THEN 'JU' WHEN @dia = 6 THEN 'VI' WHEN @dia = 7 THEN 'SA'
                         ELSE 'DO'
                     END,
-                    ISNULL(@motivofalta, 'Licencia con goce de haber')
+                    ISNULL(@motivofalta, 'Descanso Médico')
                 );
             END
             ELSE IF EXISTS (
