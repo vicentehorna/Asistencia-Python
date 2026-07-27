@@ -267,7 +267,12 @@ document.addEventListener('DOMContentLoaded', async function () {
     let lastExportPayload = null;
     let lastRowsData = [];
     let regularizarContext = null;
-    const STORAGE_KEY = 'asistencia.reporte_consolidado.state.v1';
+    // Clave por BD: BGT en hm_atilio ≠ BGT en hm_quimica; evita mostrar filas cacheadas de otra empresa.
+    const SQL_DATABASE = {{ (sql_database or '')|tojson }};
+    const STORAGE_KEY = 'asistencia.reporte_consolidado.state.v2.' + (SQL_DATABASE || 'default');
+    try {
+        window.localStorage.removeItem('asistencia.reporte_consolidado.state.v1');
+    } catch (e) { /* ignore */ }
 
     function setRowCount(n) {
         const num = Math.max(0, parseInt(n, 10) || 0);
