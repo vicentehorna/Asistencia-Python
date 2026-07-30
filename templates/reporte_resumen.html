@@ -150,7 +150,12 @@ document.addEventListener('DOMContentLoaded', async function () {
     const cardResultado = document.getElementById('cardResultado');
     const lblRowCount = document.getElementById('lblRowCount');
     let lastResumenAsistenciaExport = null;
-    const STORAGE_KEY = 'asistencia.reporte_resumen.state.v1';
+    // Clave por BD: evita mezclar resultados cacheados entre clientes / sesiones.
+    const SQL_DATABASE = {{ (sql_database or '')|tojson }};
+    const STORAGE_KEY = 'asistencia.reporte_resumen.state.v2.' + (SQL_DATABASE || 'default');
+    try {
+        window.localStorage.removeItem('asistencia.reporte_resumen.state.v1');
+    } catch (e) { /* ignore */ }
 
     function setRowCount(n) {
         const num = Math.max(0, parseInt(n, 10) || 0);
@@ -401,21 +406,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
         if (saved.filters.fechaini) txtFechaIni.value = String(saved.filters.fechaini);
         if (saved.filters.fechafin) txtFechaFin.value = String(saved.filters.fechafin);
-        if (Array.isArray(saved.data) && saved.data.length > 0) {
-            renderRows(saved.data);
-            setRowCount(saved.data.length);
-            cardResultado.classList.remove('d-none');
-            lastResumenAsistenciaExport = {
-                data: saved.data,
-                meta: saved.meta || {
-                    compania: selectedText(cboCompania),
-                    trabajador: selectedText(cboTrabajador) || 'Todos',
-                    fechaini: txtFechaIni.value,
-                    fechafin: txtFechaFin.value
-                }
-            };
-            btnExportExcel.disabled = false;
-        }
+        // No restaurar filas cacheadas: pueden estar desfasadas tras reprocesar (p. ej. nombre de horario).
+        // El usuario debe pulsar Consultar para ver datos actuales del servidor.
     }
 
     cboCompania.addEventListener('change', async function () {

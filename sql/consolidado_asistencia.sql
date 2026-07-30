@@ -706,7 +706,7 @@ BEGIN
         SELECT @cant = ISNULL(COUNT(*), 0)
         FROM RegistroAsistencia
         WHERE Person = @person
-          AND Company = @cia
+          AND (Company = @cia OR NULLIF(LTRIM(RTRIM(Company)), '') IS NULL)
           AND estado = 'A'
           AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
           AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso));
@@ -847,7 +847,7 @@ BEGIN
             SELECT @HingR = CAST(MIN(FechaHoraIngreso) AS TIME)
             FROM RegistroAsistencia
             WHERE Person = @person
-              AND Company = @cia
+              AND (Company = @cia OR NULLIF(LTRIM(RTRIM(Company)), '') IS NULL)
               AND estado = 'A'
               AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
               AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso));
@@ -861,7 +861,7 @@ BEGIN
                     ) AS Orden
                 FROM RegistroAsistencia
                 WHERE Person = @person
-                  AND Company = @cia
+                  AND (Company = @cia OR NULLIF(LTRIM(RTRIM(Company)), '') IS NULL)
                   AND estado = 'A'
                   AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
                   AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso))
@@ -916,6 +916,11 @@ BEGIN
                 @person, @cia, @FechaProceso, @idhorario, @Entrada, @Salida, @SalidaRef, @RetornoRef,
                 CASE
                     WHEN @HingR IS NULL OR @HingT IS NULL THEN 0
+                    /* hm_quimica: gracia hasta Entrada+tolerancia; si se excede, cuenta desde Entrada */
+                    WHEN DB_NAME() = N'hm_quimica'
+                         AND DATEDIFF(MINUTE, @HingT, @HingR) > @tolerancia
+                        THEN DATEDIFF(MINUTE, @HingT, @HingR)
+                    WHEN DB_NAME() = N'hm_quimica' THEN 0
                     WHEN DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia > 0
                         THEN DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia
                     ELSE 0
@@ -938,6 +943,10 @@ BEGIN
     END;
 END;
 GO
+
+
+
+
 
 GO
 
@@ -1926,6 +1935,8 @@ BEGIN
     INNER JOIN Horarios
 
         ON ResumenAsistencia.IdHorario = Horarios.IdHorario
+
+       AND Horarios.Company = @cia
 
     WHERE Fecha BETWEEN @fechaini AND @fechafin
 

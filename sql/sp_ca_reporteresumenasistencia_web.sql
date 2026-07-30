@@ -38,6 +38,7 @@ BEGIN
        AND ResumenAsistencia.Company = @cia
     INNER JOIN Horarios
         ON ResumenAsistencia.IdHorario = Horarios.IdHorario
+       AND Horarios.Company = @cia
     WHERE Fecha BETWEEN @fechaini AND @fechafin
       AND (@person = '0' OR ResumenAsistencia.Person = @person)
     ORDER BY SY_Person.Name,

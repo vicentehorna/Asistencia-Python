@@ -11,8 +11,12 @@
   Sin marcas: vacaciones -> descanso médico/incapacidad/licencia (PDT 16,20,21,22,26) -> justificación CA -> falta.
   Sin asignación de horario vigente en el día: no se genera fila en el resumen.
   RegistroAsistencia: solo marcas con estado = 'A' (activas). Las inactivas (I) se ignoran.
+  Marcas con Company NULL/vacío también se consideran (marcador de hm_quimica no graba compañía).
   Con 2 marcas: la 2.ª es salida. Con 3 marcas: si la 3.ª está más cerca de la salida
   teórica que del retorno de refrigerio, se toma como salida y E. refri queda vacía.
+  Tardanza (hm_quimica): si llega dentro de ToleranciaMinutos desde la hora de entrada -> 0;
+  si se pasa, MinutosTarde = minutos desde la hora de entrada (no se resta la tolerancia).
+  Tardanza (otras BD): minutos desde entrada menos ToleranciaMinutos (máx. 0).
 */
 SET ANSI_NULLS ON;
 GO
@@ -184,7 +188,7 @@ BEGIN
         SELECT @cant = ISNULL(COUNT(*), 0)
         FROM RegistroAsistencia
         WHERE Person = @person
-          AND Company = @cia
+          AND (Company = @cia OR NULLIF(LTRIM(RTRIM(Company)), '') IS NULL)
           AND estado = 'A'
           AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
           AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso));
@@ -325,7 +329,7 @@ BEGIN
             SELECT @HingR = CAST(MIN(FechaHoraIngreso) AS TIME)
             FROM RegistroAsistencia
             WHERE Person = @person
-              AND Company = @cia
+              AND (Company = @cia OR NULLIF(LTRIM(RTRIM(Company)), '') IS NULL)
               AND estado = 'A'
               AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
               AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso));
@@ -339,7 +343,7 @@ BEGIN
                     ) AS Orden
                 FROM RegistroAsistencia
                 WHERE Person = @person
-                  AND Company = @cia
+                  AND (Company = @cia OR NULLIF(LTRIM(RTRIM(Company)), '') IS NULL)
                   AND estado = 'A'
                   AND FechaHoraIngreso >= CONVERT(DATE, @FechaProceso)
                   AND FechaHoraIngreso < DATEADD(DAY, 1, CONVERT(DATE, @FechaProceso))
@@ -394,6 +398,11 @@ BEGIN
                 @person, @cia, @FechaProceso, @idhorario, @Entrada, @Salida, @SalidaRef, @RetornoRef,
                 CASE
                     WHEN @HingR IS NULL OR @HingT IS NULL THEN 0
+                    /* hm_quimica: gracia hasta Entrada+tolerancia; si se excede, cuenta desde Entrada */
+                    WHEN DB_NAME() = N'hm_quimica'
+                         AND DATEDIFF(MINUTE, @HingT, @HingR) > @tolerancia
+                        THEN DATEDIFF(MINUTE, @HingT, @HingR)
+                    WHEN DB_NAME() = N'hm_quimica' THEN 0
                     WHEN DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia > 0
                         THEN DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia
                     ELSE 0
