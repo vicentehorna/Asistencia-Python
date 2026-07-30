@@ -8,7 +8,8 @@
           CA_JustificacionPersona, CA_TipoJustificacion, SY_Person
 
   Feriados (SY_Holiday Status=A o CA_Feriados): se registran en resumen con Falta='N' y Motivo='Feriado'.
-  Sin marcas: vacaciones -> descanso médico/incapacidad/licencia (PDT 16,20,21,22,26) -> justificación CA -> falta.
+  Sin marcas: vacaciones -> descanso médico/incapacidad/licencia
+  (PDT 05,16,20,21,22,24,25,26,28) -> justificación CA -> falta.
   Sin asignación de horario vigente en el día: no se genera fila en el resumen.
   RegistroAsistencia: solo marcas con estado = 'A' (activas). Las inactivas (I) se ignoran.
   Marcas con Company NULL/vacío también se consideran (marcador de hm_quimica no graba compañía).
@@ -229,17 +230,21 @@ BEGIN
                   AND emr.Company = @cia
                   AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
                                                       AND CONVERT(DATE, emr.DateEnd)
-                  AND LTRIM(RTRIM(mrt.pdt)) IN ('16', '20', '21', '22', '26')
+                  AND LTRIM(RTRIM(mrt.pdt)) IN ('05', '16', '20', '21', '22', '24', '25', '26', '28')
             )
             BEGIN
                 SET @motivofalta = (
                     SELECT TOP 1
                         CASE LTRIM(RTRIM(mrt.pdt))
+                            WHEN '05' THEN 'Licencia sin goce'
                             WHEN '16' THEN 'Invalidez Temporal'
                             WHEN '20' THEN 'Descanso Médico'
                             WHEN '21' THEN 'Incapacidad Temp.'
                             WHEN '22' THEN 'Descanso Maternidad'
+                            WHEN '24' THEN 'Licencia cargo civ.'
+                            WHEN '25' THEN 'Licencia sindical'
                             WHEN '26' THEN 'Licencia con goce'
+                            WHEN '28' THEN 'Lic. Paternidad'
                             ELSE LEFT(ISNULL(mrt.Description, 'Licencia'), 20)
                         END
                     FROM PR_EmployeeMedicalRest emr
@@ -250,7 +255,7 @@ BEGIN
                       AND emr.Company = @cia
                       AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, emr.DateBegin)
                                                           AND CONVERT(DATE, emr.DateEnd)
-                      AND LTRIM(RTRIM(mrt.pdt)) IN ('16', '20', '21', '22', '26')
+                      AND LTRIM(RTRIM(mrt.pdt)) IN ('05', '16', '20', '21', '22', '24', '25', '26', '28')
                     ORDER BY emr.DateBegin DESC, emr.line DESC
                 );
 
