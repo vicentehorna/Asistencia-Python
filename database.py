@@ -1308,8 +1308,11 @@ def inactivar_registro_asistencia(cia, id_registro, xlastuser):
                 xlastuser = ?,
                 xlastdate = ?
             WHERE IdRegistro = ?
-              AND LTRIM(RTRIM(company)) = ?
               AND estado = 'A'
+              AND (
+                    LTRIM(RTRIM(ISNULL(company, ''))) = ?
+                 OR NULLIF(LTRIM(RTRIM(company)), '') IS NULL
+              )
             """,
             (user_db, now, rid, company_db),
         )
@@ -1356,7 +1359,10 @@ def eliminar_registro_asistencia(cia, id_registro):
             """
             DELETE FROM dbo.RegistroAsistencia
             WHERE IdRegistro = ?
-              AND LTRIM(RTRIM(company)) = ?
+              AND (
+                    LTRIM(RTRIM(ISNULL(company, ''))) = ?
+                 OR NULLIF(LTRIM(RTRIM(company)), '') IS NULL
+              )
             """,
             (rid, company_db),
         )
