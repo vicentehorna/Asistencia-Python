@@ -17,7 +17,9 @@
   teórica que del retorno de refrigerio, se toma como salida y E. refri queda vacía.
   Tardanza (hm_quimica): si llega dentro de ToleranciaMinutos desde la hora de entrada -> 0;
   si se pasa, MinutosTarde = minutos desde la hora de entrada (no se resta la tolerancia).
+  Refrigerio (solo hm_quimica, 4 marcas): si (E.refri - S.refri) > 60 min, el exceso se suma a MinutosTarde.
   Tardanza (otras BD): minutos desde entrada menos ToleranciaMinutos (máx. 0).
+  Con justificación CA del día: no se registra tardanza (MinutosTarde=0) y Motivo = tipo de justificación.
 */
 SET ANSI_NULLS ON;
 GO
@@ -49,6 +51,8 @@ BEGIN
     DECLARE @RetornoRef DATETIME;
     DECLARE @Salida DATETIME;
     DECLARE @motivofalta VARCHAR(20);
+    DECLARE @MinutosTarde INT;
+    DECLARE @MinutosRefri INT;
 
     SET @FechaProceso = CONVERT(DATE, @fechaini);
 
@@ -74,6 +78,8 @@ BEGIN
         SET @RetornoRef = NULL;
         SET @Salida = NULL;
         SET @motivofalta = NULL;
+        SET @MinutosTarde = 0;
+        SET @MinutosRefri = 0;
 
         IF NOT EXISTS (
             SELECT 1
@@ -395,30 +401,60 @@ BEGIN
                     SET @MinutosAdicionales = DATEDIFF(MINUTE, @SalidaTeorica, @Salida);
             END;
 
+            /* Justificación del día: anula tardanza y deja el motivo (aunque haya marcas). */
+            SET @motivofalta = (
+                SELECT TOP 1 LEFT(ISNULL(tj.Descripcion, 'Justificación'), 20)
+                FROM CA_Justificacionpersona jp
+                INNER JOIN CA_TipoJustificacion tj
+                    ON jp.idjustificacion = tj.idjustificacion
+                WHERE jp.person = @person
+                  AND jp.company = @cia
+                  AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, jp.fechainicio)
+                                                      AND CONVERT(DATE, jp.fechafin)
+                ORDER BY jp.fechainicio DESC, jp.Id DESC
+            );
+
+            SET @MinutosTarde = 0;
+            IF @motivofalta IS NULL
+            BEGIN
+                IF @HingR IS NOT NULL AND @HingT IS NOT NULL
+                BEGIN
+                    IF DB_NAME() = N'hm_quimica'
+                    BEGIN
+                        IF DATEDIFF(MINUTE, @HingT, @HingR) > @tolerancia
+                            SET @MinutosTarde = DATEDIFF(MINUTE, @HingT, @HingR);
+                    END
+                    ELSE IF DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia > 0
+                        SET @MinutosTarde = DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia;
+                END;
+
+                /* hm_quimica: 4 marcas y refrigerio > 60 min → el exceso es tardanza. */
+                IF DB_NAME() = N'hm_quimica'
+                   AND @cant = 4
+                   AND @SalidaRef IS NOT NULL
+                   AND @RetornoRef IS NOT NULL
+                BEGIN
+                    SET @MinutosRefri = DATEDIFF(MINUTE, @SalidaRef, @RetornoRef);
+                    IF @MinutosRefri > 60
+                        SET @MinutosTarde = @MinutosTarde + (@MinutosRefri - 60);
+                END;
+            END;
+
             INSERT INTO ResumenAsistencia (
                 Person, Company, Fecha, IdHorario, Entrada, Salida, SalidaRefri, EntradaRefri,
-                MinutosTarde, MinutosAdicionales, Falta, XLastUser, XLastDate, DiaSem
+                MinutosTarde, MinutosAdicionales, Falta, XLastUser, XLastDate, DiaSem, motivo
             )
             VALUES (
                 @person, @cia, @FechaProceso, @idhorario, @Entrada, @Salida, @SalidaRef, @RetornoRef,
-                CASE
-                    WHEN @HingR IS NULL OR @HingT IS NULL THEN 0
-                    /* hm_quimica: gracia hasta Entrada+tolerancia; si se excede, cuenta desde Entrada */
-                    WHEN DB_NAME() = N'hm_quimica'
-                         AND DATEDIFF(MINUTE, @HingT, @HingR) > @tolerancia
-                        THEN DATEDIFF(MINUTE, @HingT, @HingR)
-                    WHEN DB_NAME() = N'hm_quimica' THEN 0
-                    WHEN DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia > 0
-                        THEN DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia
-                    ELSE 0
-                END,
+                @MinutosTarde,
                 @MinutosAdicionales,
                 'N', 'ADMIN', GETDATE(),
                 CASE
                     WHEN @dia = 2 THEN 'LU' WHEN @dia = 3 THEN 'MA' WHEN @dia = 4 THEN 'MI'
                     WHEN @dia = 5 THEN 'JU' WHEN @dia = 6 THEN 'VI' WHEN @dia = 7 THEN 'SA'
                     ELSE 'DO'
-                END
+                END,
+                @motivofalta
             );
         END;
 
