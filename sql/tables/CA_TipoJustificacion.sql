@@ -16,6 +16,7 @@ BEGIN
         [EsDiaCompleto]     BIT NULL,
         [PagaHaber]         BIT NULL,
         [RequiereSustento]  BIT NULL,
+        [TardeRefrigerio]   BIT NULL,
         [xlastuser]         VARCHAR(20) NULL,
         [xlastdate]         DATETIME NULL,
         CONSTRAINT [PK_CA_TipoJustificacion] PRIMARY KEY CLUSTERED ([IdJustificacion] ASC)

@@ -682,12 +682,31 @@ def get_tipos_justificacion():
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT IdJustificacion, Descripcion, Abreviatura,
-                   EsDiaCompleto, PagaHaber, RequiereSustento
-            FROM CA_TipoJustificacion
-            ORDER BY Descripcion
+            SELECT CASE WHEN COL_LENGTH('dbo.CA_TipoJustificacion', 'TardeRefrigerio') IS NULL
+                        THEN 0 ELSE 1 END
             """
         )
+        has_refri = bool(cursor.fetchone()[0])
+        if has_refri:
+            cursor.execute(
+                """
+                SELECT IdJustificacion, Descripcion, Abreviatura,
+                       EsDiaCompleto, PagaHaber, RequiereSustento,
+                       ISNULL(TardeRefrigerio, 0) AS TardeRefrigerio
+                FROM CA_TipoJustificacion
+                ORDER BY Descripcion
+                """
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT IdJustificacion, Descripcion, Abreviatura,
+                       EsDiaCompleto, PagaHaber, RequiereSustento,
+                       CAST(0 AS bit) AS TardeRefrigerio
+                FROM CA_TipoJustificacion
+                ORDER BY Descripcion
+                """
+            )
         cols = [c[0] for c in cursor.description]
         rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
         cursor.close()
@@ -716,6 +735,7 @@ def guardar_tipo_justificacion(data, usuario):
     es_dia = 1 if data.get('esDiaCompleto') else 0
     paga = 1 if data.get('pagaHaber') else 0
     req = 1 if data.get('requiereSustento') else 0
+    tarde_refri = 1 if data.get('tardeRefrigerio') else 0
     user = (str(usuario) if usuario is not None else '')[:20]
 
     jid = data.get('idJustificacion') if data.get('idJustificacion') is not None else data.get('id')
@@ -730,29 +750,59 @@ def guardar_tipo_justificacion(data, usuario):
     try:
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT CASE WHEN COL_LENGTH('dbo.CA_TipoJustificacion', 'TardeRefrigerio') IS NULL
+                        THEN 0 ELSE 1 END
+            """
+        )
+        has_refri = bool(cursor.fetchone()[0])
         if jid is not None and jid > 0:
-            cursor.execute(
-                """
-                UPDATE CA_TipoJustificacion
-                SET Descripcion = ?, Abreviatura = ?, EsDiaCompleto = ?, PagaHaber = ?, RequiereSustento = ?,
-                    xlastuser = ?, xlastdate = GETDATE()
-                WHERE IdJustificacion = ?
-                """,
-                (descripcion, abreviatura or None, es_dia, paga, req, user, jid),
-            )
+            if has_refri:
+                cursor.execute(
+                    """
+                    UPDATE CA_TipoJustificacion
+                    SET Descripcion = ?, Abreviatura = ?, EsDiaCompleto = ?, PagaHaber = ?,
+                        RequiereSustento = ?, TardeRefrigerio = ?,
+                        xlastuser = ?, xlastdate = GETDATE()
+                    WHERE IdJustificacion = ?
+                    """,
+                    (descripcion, abreviatura or None, es_dia, paga, req, tarde_refri, user, jid),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE CA_TipoJustificacion
+                    SET Descripcion = ?, Abreviatura = ?, EsDiaCompleto = ?, PagaHaber = ?, RequiereSustento = ?,
+                        xlastuser = ?, xlastdate = GETDATE()
+                    WHERE IdJustificacion = ?
+                    """,
+                    (descripcion, abreviatura or None, es_dia, paga, req, user, jid),
+                )
             if cursor.rowcount == 0:
                 cursor.close()
                 conn.close()
                 return False, 'No se encontró el registro a actualizar.'
         else:
-            cursor.execute(
-                """
-                INSERT INTO CA_TipoJustificacion
-                    (Descripcion, Abreviatura, EsDiaCompleto, PagaHaber, RequiereSustento, xlastuser, xlastdate)
-                VALUES (?, ?, ?, ?, ?, ?, GETDATE())
-                """,
-                (descripcion, abreviatura or None, es_dia, paga, req, user),
-            )
+            if has_refri:
+                cursor.execute(
+                    """
+                    INSERT INTO CA_TipoJustificacion
+                        (Descripcion, Abreviatura, EsDiaCompleto, PagaHaber, RequiereSustento,
+                         TardeRefrigerio, xlastuser, xlastdate)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, GETDATE())
+                    """,
+                    (descripcion, abreviatura or None, es_dia, paga, req, tarde_refri, user),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO CA_TipoJustificacion
+                        (Descripcion, Abreviatura, EsDiaCompleto, PagaHaber, RequiereSustento, xlastuser, xlastdate)
+                    VALUES (?, ?, ?, ?, ?, ?, GETDATE())
+                    """,
+                    (descripcion, abreviatura or None, es_dia, paga, req, user),
+                )
         conn.commit()
         cursor.close()
         conn.close()

@@ -43,6 +43,12 @@
                             <label class="form-check-label small fw-bold text-secondary" for="requiereSustento" style="font-size: 0.75rem;">Requiere sustento</label>
                         </div>
                     </div>
+                    <div class="mb-3 d-flex align-items-center" id="wrapTardeRefrigerio" {% if sql_database != 'hm_quimica' %}style="display:none"{% endif %}>
+                        <div class="form-check form-switch p-0 ps-5">
+                            <input class="form-check-input" type="checkbox" id="tardeRefrigerio">
+                            <label class="form-check-label small fw-bold text-secondary" for="tardeRefrigerio" style="font-size: 0.75rem;">Tarde Refrigerio</label>
+                        </div>
+                    </div>
 
                     <div class="pt-2 border-top d-flex flex-wrap gap-2 justify-content-start">
                         <button type="button" class="btn btn-success btn-sm px-4 shadow-sm" onclick="limpiarFormulario()">
@@ -77,6 +83,9 @@
                                 <th class="text-center py-2" style="width: 56px;">D.C.</th>
                                 <th class="text-center py-2" style="width: 56px;">Haber</th>
                                 <th class="text-center py-2" style="width: 56px;">Sust.</th>
+                                {% if sql_database == 'hm_quimica' %}
+                                <th class="text-center py-2" style="width: 72px;" title="Tarde Refrigerio">T.Ref.</th>
+                                {% endif %}
                                 <th class="text-center py-2" style="width: 72px;"></th>
                             </tr>
                         </thead>
@@ -94,6 +103,11 @@
                                 <td class="text-center align-middle py-1">
                                     <span class="fw-bold" style="color: {{ '#10b981' if j.RequiereSustento else '#ef4444' }};">{{ 'Sí' if j.RequiereSustento else 'No' }}</span>
                                 </td>
+                                {% if sql_database == 'hm_quimica' %}
+                                <td class="text-center align-middle py-1">
+                                    <span class="fw-bold" style="color: {{ '#10b981' if j.TardeRefrigerio else '#ef4444' }};">{{ 'Sí' if j.TardeRefrigerio else 'No' }}</span>
+                                </td>
+                                {% endif %}
                                 <td class="text-center align-middle py-1">
                                     <button type="button" class="btn btn-link btn-sm text-dark p-0 me-1" onclick="editarJustificacion({{ j.IdJustificacion }})" title="Editar">
                                         <i class="bi bi-pencil"></i>
@@ -140,6 +154,8 @@
         document.getElementById('esDiaCompleto').checked = false;
         document.getElementById('pagaHaber').checked = false;
         document.getElementById('requiereSustento').checked = false;
+        const chkRefri = document.getElementById('tardeRefrigerio');
+        if (chkRefri) chkRefri.checked = false;
     };
 
     window.editarJustificacion = function (id) {
@@ -157,6 +173,8 @@
         document.getElementById('esDiaCompleto').checked = bitSi(row.EsDiaCompleto);
         document.getElementById('pagaHaber').checked = bitSi(row.PagaHaber);
         document.getElementById('requiereSustento').checked = bitSi(row.RequiereSustento);
+        const chkRefri = document.getElementById('tardeRefrigerio');
+        if (chkRefri) chkRefri.checked = bitSi(row.TardeRefrigerio);
         const panel = document.querySelector('.col-md-4 .card-body');
         if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
@@ -167,7 +185,8 @@
             abreviatura: document.getElementById('abreviatura').value.trim(),
             esDiaCompleto: document.getElementById('esDiaCompleto').checked,
             pagaHaber: document.getElementById('pagaHaber').checked,
-            requiereSustento: document.getElementById('requiereSustento').checked
+            requiereSustento: document.getElementById('requiereSustento').checked,
+            tardeRefrigerio: !!(document.getElementById('tardeRefrigerio') && document.getElementById('tardeRefrigerio').checked)
         };
         const id = document.getElementById('idJustificacion').value.trim();
         if (id) payload.idJustificacion = parseInt(id, 10);

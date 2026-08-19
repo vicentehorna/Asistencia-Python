@@ -19,7 +19,8 @@
   si se pasa, MinutosTarde = minutos desde la hora de entrada (no se resta la tolerancia).
   Refrigerio (solo hm_quimica, 4 marcas): si (E.refri - S.refri) > 60 min, el exceso se suma a MinutosTarde.
   Tardanza (otras BD): minutos desde entrada menos ToleranciaMinutos (máx. 0).
-  Con justificación CA del día: no se registra tardanza (MinutosTarde=0) y Motivo = tipo de justificación.
+  Con justificación CA del día (no Tarde Refrigerio): no se registra tardanza de entrada.
+  hm_quimica + justificación Tarde Refrigerio: no se suma el exceso de almuerzo; la tardanza de entrada sí se calcula.
 */
 SET ANSI_NULLS ON;
 GO
@@ -53,6 +54,8 @@ BEGIN
     DECLARE @motivofalta VARCHAR(20);
     DECLARE @MinutosTarde INT;
     DECLARE @MinutosRefri INT;
+    DECLARE @justifEntrada BIT;
+    DECLARE @justifRefri BIT;
 
     SET @FechaProceso = CONVERT(DATE, @fechaini);
 
@@ -80,6 +83,8 @@ BEGIN
         SET @motivofalta = NULL;
         SET @MinutosTarde = 0;
         SET @MinutosRefri = 0;
+        SET @justifEntrada = 0;
+        SET @justifRefri = 0;
 
         IF NOT EXISTS (
             SELECT 1
@@ -401,9 +406,13 @@ BEGIN
                     SET @MinutosAdicionales = DATEDIFF(MINUTE, @SalidaTeorica, @Salida);
             END;
 
-            /* Justificación del día: anula tardanza y deja el motivo (aunque haya marcas). */
-            SET @motivofalta = (
-                SELECT TOP 1 LEFT(ISNULL(tj.Descripcion, 'Justificación'), 20)
+            /* Justificaciones del día (hm_quimica): TardeRefrigerio anula solo exceso de almuerzo. */
+            SET @justifEntrada = 0;
+            SET @justifRefri = 0;
+            SET @motivofalta = NULL;
+
+            IF EXISTS (
+                SELECT 1
                 FROM CA_Justificacionpersona jp
                 INNER JOIN CA_TipoJustificacion tj
                     ON jp.idjustificacion = tj.idjustificacion
@@ -411,11 +420,55 @@ BEGIN
                   AND jp.company = @cia
                   AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, jp.fechainicio)
                                                       AND CONVERT(DATE, jp.fechafin)
-                ORDER BY jp.fechainicio DESC, jp.Id DESC
-            );
+                  AND ISNULL(tj.TardeRefrigerio, 0) = 0
+            )
+            BEGIN
+                SET @justifEntrada = 1;
+                SET @motivofalta = (
+                    SELECT TOP 1 LEFT(ISNULL(tj.Descripcion, 'Justificación'), 20)
+                    FROM CA_Justificacionpersona jp
+                    INNER JOIN CA_TipoJustificacion tj
+                        ON jp.idjustificacion = tj.idjustificacion
+                    WHERE jp.person = @person
+                      AND jp.company = @cia
+                      AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, jp.fechainicio)
+                                                          AND CONVERT(DATE, jp.fechafin)
+                      AND ISNULL(tj.TardeRefrigerio, 0) = 0
+                    ORDER BY jp.fechainicio DESC, jp.Id DESC
+                );
+            END;
+
+            IF DB_NAME() = N'hm_quimica'
+               AND EXISTS (
+                SELECT 1
+                FROM CA_Justificacionpersona jp
+                INNER JOIN CA_TipoJustificacion tj
+                    ON jp.idjustificacion = tj.idjustificacion
+                WHERE jp.person = @person
+                  AND jp.company = @cia
+                  AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, jp.fechainicio)
+                                                      AND CONVERT(DATE, jp.fechafin)
+                  AND ISNULL(tj.TardeRefrigerio, 0) = 1
+            )
+            BEGIN
+                SET @justifRefri = 1;
+                IF @motivofalta IS NULL
+                    SET @motivofalta = (
+                        SELECT TOP 1 LEFT(ISNULL(tj.Descripcion, 'Justificación'), 20)
+                        FROM CA_Justificacionpersona jp
+                        INNER JOIN CA_TipoJustificacion tj
+                            ON jp.idjustificacion = tj.idjustificacion
+                        WHERE jp.person = @person
+                          AND jp.company = @cia
+                          AND CONVERT(DATE, @FechaProceso) BETWEEN CONVERT(DATE, jp.fechainicio)
+                                                              AND CONVERT(DATE, jp.fechafin)
+                          AND ISNULL(tj.TardeRefrigerio, 0) = 1
+                        ORDER BY jp.fechainicio DESC, jp.Id DESC
+                    );
+            END;
 
             SET @MinutosTarde = 0;
-            IF @motivofalta IS NULL
+            IF @justifEntrada = 0
             BEGIN
                 IF @HingR IS NOT NULL AND @HingT IS NOT NULL
                 BEGIN
@@ -427,17 +480,18 @@ BEGIN
                     ELSE IF DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia > 0
                         SET @MinutosTarde = DATEDIFF(MINUTE, @HingT, @HingR) - @tolerancia;
                 END;
+            END;
 
-                /* hm_quimica: 4 marcas y refrigerio > 60 min → el exceso es tardanza. */
-                IF DB_NAME() = N'hm_quimica'
-                   AND @cant = 4
-                   AND @SalidaRef IS NOT NULL
-                   AND @RetornoRef IS NOT NULL
-                BEGIN
-                    SET @MinutosRefri = DATEDIFF(MINUTE, @SalidaRef, @RetornoRef);
-                    IF @MinutosRefri > 60
-                        SET @MinutosTarde = @MinutosTarde + (@MinutosRefri - 60);
-                END;
+            /* hm_quimica: 4 marcas y refrigerio > 60 min → el exceso es tardanza (salvo justif. Tarde Refrigerio). */
+            IF DB_NAME() = N'hm_quimica'
+               AND @justifRefri = 0
+               AND @cant = 4
+               AND @SalidaRef IS NOT NULL
+               AND @RetornoRef IS NOT NULL
+            BEGIN
+                SET @MinutosRefri = DATEDIFF(MINUTE, @SalidaRef, @RetornoRef);
+                IF @MinutosRefri > 60
+                    SET @MinutosTarde = @MinutosTarde + (@MinutosRefri - 60);
             END;
 
             INSERT INTO ResumenAsistencia (
