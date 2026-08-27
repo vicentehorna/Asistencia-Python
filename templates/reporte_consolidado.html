@@ -296,9 +296,12 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     const UMBRAL_DIAS_TARDANZA_PLANILLA = 6;
+    /** Factor ×3 por >6 días con tardanza: solo hm_atilio; otras BD usan minutos reales. */
+    const APLICAR_FACTOR_TARDANZA_X3 = (SQL_DATABASE === 'hm_atilio');
 
     function minutosParaImportarPlanilla(minutos, diasTardanza) {
         const m = parseInt(minutos, 10) || 0;
+        if (!APLICAR_FACTOR_TARDANZA_X3) return m;
         const d = parseInt(diasTardanza, 10) || 0;
         return d > UMBRAL_DIAS_TARDANZA_PLANILLA ? m * 3 : m;
     }
@@ -716,7 +719,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             const minutosReg = minutosParaImportarPlanilla(r.minutos, r.diasTardanza);
             totalRegistro += minutosReg;
             const etiqueta = escapeHtml(r.name || r.person);
-            if (r.diasTardanza > UMBRAL_DIAS_TARDANZA_PLANILLA) {
+            if (APLICAR_FACTOR_TARDANZA_X3 && r.diasTardanza > UMBRAL_DIAS_TARDANZA_PLANILLA) {
                 return '<li><strong>' + etiqueta + '</strong>: '
                     + minutosReg + ' min. '
                     + '(base ' + (r.minutos || 0) + ' min. × 3 por '
@@ -725,15 +728,18 @@ document.addEventListener('DOMContentLoaded', async function () {
             return '<li><strong>' + etiqueta + '</strong>: ' + minutosReg + ' min.</li>';
         });
 
-        resumenRegistroPlanillas.innerHTML =
+        let html =
             '<strong>' + seleccionados.length + '</strong> trabajador(es) seleccionado(s).<br>'
             + 'Total minutos de tardanza a registrar: <strong>' + totalRegistro + '</strong>.'
             + (lineas.length
                 ? '<ul class="mb-0 mt-2 ps-3 small">' + lineas.join('') + '</ul>'
-                : '')
-            + '<p class="small text-muted mb-0 mt-2">Si un trabajador tiene más de '
-            + UMBRAL_DIAS_TARDANZA_PLANILLA + ' días con tardanza en el rango, '
-            + 'sus minutos se multiplican por 3.</p>';
+                : '');
+        if (APLICAR_FACTOR_TARDANZA_X3) {
+            html += '<p class="small text-muted mb-0 mt-2">Si un trabajador tiene más de '
+                + UMBRAL_DIAS_TARDANZA_PLANILLA + ' días con tardanza en el rango, '
+                + 'sus minutos se multiplican por 3.</p>';
+        }
+        resumenRegistroPlanillas.innerHTML = html;
     }
 
     function mostrarResultadoRegistroPlanillas(tipo, html) {

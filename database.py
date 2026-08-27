@@ -2187,9 +2187,16 @@ def _count_dias_tardanza_rango(cursor, cia, person, fechaini, fechafin):
 
 
 def _minutos_tardanza_para_planilla(minutos_base, dias_tardanza):
-    """Si hay más de 6 días con tardanza en el rango, triplica los minutos."""
+    """
+    Si hay más de 6 días con tardanza en el rango, triplica los minutos.
+    Solo aplica en hm_atilio; en otras BD se registran los minutos reales.
+    """
     minutos = int(minutos_base or 0)
-    if int(dias_tardanza or 0) > 6:
+    try:
+        db_name = (get_active_database(required=False) or '').strip().lower()
+    except Exception:
+        db_name = ''
+    if db_name == 'hm_atilio' and int(dias_tardanza or 0) > 6:
         return minutos * 3
     return minutos
 
@@ -2238,7 +2245,7 @@ def registrar_tardanza_planilla(company, prperiod, trabajadores, usuario, fechai
                     cursor, cia, person, fechaini, fechafin
                 )
                 minutos = _minutos_tardanza_para_planilla(minutos_base, dias_tardanza)
-                factor_aplicado = dias_tardanza > 6
+                factor_aplicado = minutos != minutos_base and dias_tardanza > 6
 
             cursor.execute(
                 """
