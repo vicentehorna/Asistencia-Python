@@ -13,7 +13,7 @@
     <div class="card shadow-sm border-0 mb-3" style="border-top: 3px solid #64748b !important;">
         <div class="card-body bg-light p-3">
             <form id="frmFiltrosJust" class="row g-3 align-items-end">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="form-label small fw-bold text-muted mb-1" for="ciaFilter">Compañía</label>
                     <select id="ciaFilter" class="form-select form-select-sm shadow-none border-secondary" required>
                         {% for c in companies %}
@@ -23,13 +23,19 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="form-label small fw-bold text-muted mb-1" for="personFilter"><i class="bi bi-person-bounding-box me-1"></i> Filtrar por Trabajador</label>
                     <select id="personFilter" class="form-select form-select-sm shadow-none border-secondary" disabled>
                         <option value="0">TODOS LOS TRABAJADORES</option>
                     </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold text-muted mb-1" for="periodoFilter"><i class="bi bi-calendar3 me-1"></i> Periodo</label>
+                    <select id="periodoFilter" class="form-select form-select-sm shadow-none border-secondary">
+                        <option value="">TODOS</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
                     <div class="d-flex align-items-center gap-2 justify-content-end">
                         <button type="submit" class="btn btn-primary btn-sm px-4">
                             <i class="bi bi-search"></i> Consultar
@@ -195,16 +201,37 @@
         if (selFiltro) selFiltro.disabled = false;
     }
 
+    async function cargarPeriodos(cia) {
+        const sel = $('periodoFilter');
+        sel.innerHTML = '<option value="">TODOS</option>';
+        if (!cia) return;
+        try {
+            const res = await fetch('/api/selectores/periodos-planilla?cia=' + encodeURIComponent(cia));
+            const json = await res.json();
+            (Array.isArray(json.data) ? json.data : []).forEach((p) => {
+                const opt = document.createElement('option');
+                opt.value = txt(p.id);
+                opt.textContent = txt(p.text);
+                sel.appendChild(opt);
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
     async function cargarLista() {
         const cia = txt($('ciaFilter').value).trim();
         const person = txt(($('personFilter') || {}).value || '0').trim() || '0';
+        const periodo = txt($('periodoFilter').value).trim();
         if (!cia) {
             $('tablaJustificaciones').innerHTML = '';
             setCount(0);
             return;
         }
         const res = await fetch(
-            '/api/justificaciones_persona/listar?cia=' + encodeURIComponent(cia) + '&person=' + encodeURIComponent(person)
+            '/api/justificaciones_persona/listar?cia=' + encodeURIComponent(cia)
+            + '&person=' + encodeURIComponent(person)
+            + '&periodo=' + encodeURIComponent(periodo)
         );
         const json = await res.json();
         if (!res.ok || !json.success) {
@@ -312,7 +339,7 @@
     $('btnNuevaJustificacion').addEventListener('click', nuevoRegistro);
     $('ciaFilter').addEventListener('change', async function () {
         const cia = txt(this.value).trim();
-        await cargarTrabajadores(cia);
+        await Promise.all([cargarTrabajadores(cia), cargarPeriodos(cia)]);
     });
     $('frmFiltrosJust').addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -334,7 +361,8 @@
     (async function init() {
         try {
             await cargarTipos();
-            await cargarTrabajadores(txt($('ciaFilter').value).trim());
+            const ciaIni = txt($('ciaFilter').value).trim();
+            await Promise.all([cargarTrabajadores(ciaIni), cargarPeriodos(ciaIni)]);
             await cargarLista();
         } catch (e) {
             console.error(e);

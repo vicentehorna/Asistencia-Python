@@ -101,6 +101,22 @@ def inject_now():
     return {'now': datetime.now(), 'sql_database': sql_db}
 
 
+def _as_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    s = str(value).strip()
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%Y%m%d'):
+        try:
+            return datetime.strptime(s[:10] if fmt != '%Y%m%d' else s[:8], fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _jsonable_value(value):
     if value is None:
         return None
@@ -572,16 +588,41 @@ def api_eliminar_asignacion(id_asignacion):
 def api_listar_justificaciones_persona():
     cia = (request.args.get('cia') or '').strip()
     person = (request.args.get('person') or '0').strip() or '0'
+    periodo = (request.args.get('periodo') or '').strip()
     if not cia or cia not in _companias_permitidas_ids():
         return jsonify({"success": False, "error": "Compañía no válida.", "data": []}), 400
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        rango = None
+        if periodo:
+            cursor.execute(
+                """
+                SELECT MIN(CONVERT(DATE, DateBegin)), MAX(CONVERT(DATE, DateEnd))
+                FROM PR_Period
+                WHERE Company = ? AND PRPeriod = ?
+                """,
+                (cia, periodo),
+            )
+            r = cursor.fetchone()
+            if not r or r[0] is None or r[1] is None:
+                return jsonify({"success": True, "data": []})
+            rango = (_as_date(r[0]), _as_date(r[1]))
+
         cursor.execute("EXEC [dbo].[sp_ca_listajustificaciones_web] @cia=?, @person=?", (cia, person))
         cols = [str(c[0]).strip() for c in (cursor.description or [])]
+        cols_lower = [c.lower() for c in cols]
+        idx_fi = cols_lower.index('fechainicio') if 'fechainicio' in cols_lower else None
+        idx_ff = cols_lower.index('fechafin') if 'fechafin' in cols_lower else None
         data = []
         for row in cursor.fetchall():
+            if rango and idx_fi is not None and idx_ff is not None:
+                fi = _as_date(row[idx_fi])
+                ff = _as_date(row[idx_ff])
+                if fi is None or ff is None or fi > rango[1] or ff < rango[0]:
+                    continue
             item = {}
             for i, col in enumerate(cols):
                 key = col if col else f"col{i + 1}"
