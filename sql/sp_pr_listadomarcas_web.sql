@@ -5,6 +5,10 @@
   GPS: Latitud/Longitud/PC solo existen en hm_quimica. En esa BD se leen con SQL
        dinámico; en cualquier otra BD se devuelve NULL para no referenciar
        columnas inexistentes (la pantalla muestra "Sin GPS").
+  Empresa: se filtra por RegistroAsistencia.company (la empresa real de la marca).
+       Un trabajador puede ser empleado en varias empresas; el JOIN con PR_Employee
+       por sí solo traía marcas de otras empresas. Las marcas antiguas sin company
+       (NULL/vacío) se aceptan vía el empleado, igual que en Procesar Asistencia.
 */
 SET ANSI_NULLS ON;
 GO
@@ -57,6 +61,7 @@ BEGIN
                   BETWEEN CONVERT(VARCHAR(8), @Fechainicio, 112)
                       AND CONVERT(VARCHAR(8), @FechaFin, 112)
               AND (@person = ''0'' OR R.Person = @person)
+              AND (R.company = @cia OR NULLIF(LTRIM(RTRIM(R.company)), '''') IS NULL)
               AND R.estado = ''A''
             ORDER BY P.Name, R.FechaHoraIngreso',
             N'@cia CHAR(4), @Fechainicio DATETIME, @FechaFin DATETIME, @person VARCHAR(20)',
@@ -97,6 +102,7 @@ BEGIN
           BETWEEN CONVERT(VARCHAR(8), @Fechainicio, 112)
               AND CONVERT(VARCHAR(8), @FechaFin, 112)
       AND (@person = '0' OR R.Person = @person)
+      AND (R.company = @cia OR NULLIF(LTRIM(RTRIM(R.company)), '') IS NULL)
       AND R.estado = 'A'
     ORDER BY P.Name, R.FechaHoraIngreso;
 END;
