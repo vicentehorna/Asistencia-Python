@@ -45,6 +45,18 @@ ALTER TABLE [dbo].[RegistroAsistencia]
     DEFAULT ('A') FOR [estado];
 GO
 
+/* Solo hm_quimica: ubicación GPS de la marcación (el SP de listado las lee con
+   SQL dinámico y en otras BD devuelve NULL). Ver RegistroAsistencia_GPS.sql */
+IF DB_NAME() = N'hm_quimica' AND COL_LENGTH('dbo.RegistroAsistencia', 'Latitud') IS NULL
+    ALTER TABLE [dbo].[RegistroAsistencia] ADD [Latitud] DECIMAL(10, 7) NULL;
+GO
+IF DB_NAME() = N'hm_quimica' AND COL_LENGTH('dbo.RegistroAsistencia', 'Longitud') IS NULL
+    ALTER TABLE [dbo].[RegistroAsistencia] ADD [Longitud] DECIMAL(10, 7) NULL;
+GO
+IF DB_NAME() = N'hm_quimica' AND COL_LENGTH('dbo.RegistroAsistencia', 'PC') IS NULL
+    ALTER TABLE [dbo].[RegistroAsistencia] ADD [PC] VARCHAR(255) NULL;
+GO
+
 ALTER TABLE [dbo].[RegistroAsistencia] WITH CHECK
     ADD CONSTRAINT [FK_RegistroAsistencia_Trabajadores]
     FOREIGN KEY ([IdTrabajador])

@@ -3,7 +3,22 @@
 {% block title %}Gestión de Marcas{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <style>
+    .table-gestion-marcas .col-ubicacion {
+        width: 6rem;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    #mapaUbicacion {
+        height: 340px;
+        width: 100%;
+        border-radius: 0.375rem;
+        border: 1px solid #dee2e6;
+        background-color: #f1f5f9;
+        z-index: 0;
+    }
     .table-scroll-container {
         max-height: 65vh;
         overflow: auto;
@@ -134,6 +149,7 @@
                             <th class="col-fecha">Hora</th>
                             <th class="col-cargo">Cargo</th>
                             <th class="col-evidencia">Evidencia</th>
+                            <th class="col-ubicacion">Ubicación</th>
                             <th class="col-acciones">Acciones</th>
                         </tr>
                     </thead>
@@ -156,6 +172,44 @@
                 <img id="imgEvidencia" src="" class="img-fluid rounded shadow-sm" alt="Foto evidencia" style="max-height: 400px; object-fit: contain;" referrerpolicy="no-referrer-when-downgrade">
             </div>
             <div class="modal-footer border-top-0 pt-0">
+                <button type="button" class="btn btn-light btn-sm text-primary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalUbicacion" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header" style="background-color: #1e293b; color: white;">
+                <h6 class="modal-title"><i class="bi bi-geo-alt-fill me-2"></i><span id="modalUbicacionTitulo">Ubicación de la marcación</span></h6>
+                <button type="button" class="btn-close btn-close-white shadow-none" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div id="mapaUbicacion" class="mb-3"></div>
+                <div class="card border-0 bg-light">
+                    <div class="card-body py-2 px-3">
+                        <div class="row g-2 small">
+                            <div class="col-md-7">
+                                <div><span class="text-muted">Trabajador:</span> <strong id="ubiTrabajador">—</strong></div>
+                                <div><span class="text-muted">Fecha y hora:</span> <span id="ubiFechaHora">—</span></div>
+                                <div><span class="text-muted">Dirección:</span> <span id="ubiDireccion">—</span></div>
+                            </div>
+                            <div class="col-md-5">
+                                <div><span class="text-muted">Latitud:</span> <span id="ubiLatitud" class="font-monospace">—</span></div>
+                                <div><span class="text-muted">Longitud:</span> <span id="ubiLongitud" class="font-monospace">—</span></div>
+                                <div><span class="text-muted">PC / Dispositivo:</span> <span id="ubiPc">—</span></div>
+                            </div>
+                        </div>
+                        <div id="ubiFotoWrap" class="mt-2 d-none">
+                            <div class="text-muted small mb-1">Foto de la marcación:</div>
+                            <img id="ubiFoto" src="" class="img-fluid rounded shadow-sm" alt="Foto de la marcación" style="max-height: 220px; object-fit: contain;" referrerpolicy="no-referrer-when-downgrade">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-top-0 pt-0">
+                <a id="ubiLinkGoogle" href="#" target="_blank" rel="noopener" class="btn btn-outline-success btn-sm me-auto"><i class="bi bi-box-arrow-up-right me-1"></i>Abrir en Google Maps</a>
                 <button type="button" class="btn btn-light btn-sm text-primary" data-bs-dismiss="modal">Cerrar</button>
             </div>
         </div>
@@ -200,6 +254,7 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 let lastMarcasExcelPayload = null;
 let lastMarcasRowsRaw = [];
@@ -585,6 +640,12 @@ function renderMarcasRows(rows, filters) {
         const hora = pickRow(row, ['hora', 'Hora']);
         const cargo = pickRow(row, ['cargo', 'Cargo']);
         const rutaFoto = pickRow(row, ['RutaFoto', 'rutafoto']);
+        const latNum = parseFloat(pickRow(row, ['Latitud', 'latitud']));
+        const lonNum = parseFloat(pickRow(row, ['Longitud', 'longitud']));
+        const pcValor = pickRow(row, ['PC', 'pc']);
+        const tieneGps = isFinite(latNum) && isFinite(lonNum)
+            && Math.abs(latNum) <= 90 && Math.abs(lonNum) <= 180
+            && !(latNum === 0 && lonNum === 0);
         const horaDisplay = formatHoraConSegundos(hora, fh);
 
         let fechaStr = '';
@@ -615,6 +676,23 @@ function renderMarcasRows(rows, filters) {
                 '<i class="bi bi-image fs-6"></i></button>';
         } else {
             evidenciaHtml = '<i class="bi bi-image text-muted opacity-25 fs-6" title="Sin foto"></i>';
+        }
+
+        let ubicacionHtml = '';
+        if (tieneGps) {
+            ubicacionHtml = '<button type="button" class="btn btn-link btn-sm text-danger p-0 btn-ver-ubicacion" ' +
+                'data-lat="' + latNum + '" data-lon="' + lonNum + '" ' +
+                'data-nombre="' + escapeHtml(String(nombre || '')) + '" ' +
+                'data-dni="' + escapeHtml(String(dni || '')) + '" ' +
+                'data-fecha="' + escapeHtml(String(fechaStr || '')) + '" ' +
+                'data-hora="' + escapeHtml(String(horaDisplay || '')) + '" ' +
+                'data-pc="' + escapeHtml(String(pcValor || '')) + '" ' +
+                'data-ruta="' + escapeHtml(String(rutaFoto || '')) + '" ' +
+                'title="Ver ubicación GPS en el mapa">' +
+                '<i class="bi bi-geo-alt-fill fs-6"></i></button>';
+        } else {
+            ubicacionHtml = '<span class="text-muted" title="Registro realizado sin coordenadas GPS disponibles">' +
+                '<i class="bi bi-geo-alt opacity-25 fs-6"></i></span>';
         }
 
         const fechaIso = fechaDiaKeyFromMarcaRow(row);
@@ -653,11 +731,27 @@ function renderMarcasRows(rows, filters) {
             '<td class="col-fecha">' + escapeHtml(horaDisplay) + '</td>' +
             '<td class="col-cargo">' + escapeHtml(cargo) + '</td>' +
             '<td class="col-evidencia">' + evidenciaHtml + '</td>' +
+            '<td class="col-ubicacion">' + ubicacionHtml + '</td>' +
             '<td class="col-acciones">' + accionHtml + '</td>';
         const btn = tr.querySelector('button[data-ruta]');
         if (btn) {
             btn.addEventListener('click', function () {
                 verEvidencia(this.getAttribute('data-ruta'), this.getAttribute('data-nombre'));
+            });
+        }
+        const btnUbicacion = tr.querySelector('.btn-ver-ubicacion');
+        if (btnUbicacion) {
+            btnUbicacion.addEventListener('click', function () {
+                verUbicacion({
+                    lat: parseFloat(this.getAttribute('data-lat')),
+                    lon: parseFloat(this.getAttribute('data-lon')),
+                    nombre: this.getAttribute('data-nombre') || '',
+                    dni: this.getAttribute('data-dni') || '',
+                    fecha: this.getAttribute('data-fecha') || '',
+                    hora: this.getAttribute('data-hora') || '',
+                    pc: this.getAttribute('data-pc') || '',
+                    ruta: this.getAttribute('data-ruta') || ''
+                });
             });
         }
         const btnAgregar = tr.querySelector('.btn-agregar-marca');
@@ -878,6 +972,96 @@ function verEvidencia(rutaFoto, nombre) {
     img.src = url;
     const modal = new bootstrap.Modal(document.getElementById('modalEvidencia'));
     modal.show();
+}
+
+let mapaLeaflet = null;
+let marcadorLeaflet = null;
+let modalUbicacionObj = null;
+let ubicacionPendiente = null;
+let secuenciaDireccion = 0;
+
+function verUbicacion(info) {
+    const lat = Number(info.lat);
+    const lon = Number(info.lon);
+    document.getElementById('modalUbicacionTitulo').innerText = 'Ubicación: ' + (info.nombre || '');
+    document.getElementById('ubiTrabajador').innerText =
+        (info.nombre || '—') + (info.dni ? ' (DNI ' + info.dni + ')' : '');
+    document.getElementById('ubiFechaHora').innerText =
+        ((info.fecha || '') + ' ' + (info.hora || '')).trim() || '—';
+    document.getElementById('ubiLatitud').innerText = isFinite(lat) ? lat.toFixed(7) : '—';
+    document.getElementById('ubiLongitud').innerText = isFinite(lon) ? lon.toFixed(7) : '—';
+    document.getElementById('ubiPc').innerText = info.pc || '—';
+    document.getElementById('ubiDireccion').innerText = 'Buscando dirección…';
+    document.getElementById('ubiLinkGoogle').href =
+        'https://www.google.com/maps?q=' + lat + ',' + lon;
+
+    const fotoWrap = document.getElementById('ubiFotoWrap');
+    const fotoImg = document.getElementById('ubiFoto');
+    if (info.ruta) {
+        fotoImg.src = buildFotoUrl(info.ruta);
+        fotoWrap.classList.remove('d-none');
+    } else {
+        fotoImg.removeAttribute('src');
+        fotoWrap.classList.add('d-none');
+    }
+
+    ubicacionPendiente = { lat: lat, lon: lon, nombre: info.nombre || '', fecha: info.fecha || '', hora: info.hora || '' };
+    const modalEl = document.getElementById('modalUbicacion');
+    if (!modalUbicacionObj) {
+        modalUbicacionObj = new bootstrap.Modal(modalEl);
+        modalEl.addEventListener('shown.bs.modal', function () {
+            if (ubicacionPendiente) pintarMapaUbicacion(ubicacionPendiente);
+        });
+    }
+    modalUbicacionObj.show();
+    buscarDireccionUbicacion(lat, lon);
+}
+
+function pintarMapaUbicacion(info) {
+    const mapaEl = document.getElementById('mapaUbicacion');
+    if (!mapaEl) return;
+    if (typeof L === 'undefined') {
+        /* Sin Leaflet (CDN caído): visor embebido de OpenStreetMap */
+        const d = 0.004;
+        mapaEl.innerHTML = '<iframe title="Mapa" width="100%" height="338" frameborder="0" src="https://www.openstreetmap.org/export/embed.html?bbox=' +
+            (info.lon - d) + ',' + (info.lat - d) + ',' + (info.lon + d) + ',' + (info.lat + d) +
+            '&layer=mapnik&marker=' + info.lat + ',' + info.lon + '"></iframe>';
+        return;
+    }
+    if (!mapaLeaflet) {
+        mapaEl.innerHTML = '';
+        mapaLeaflet = L.map('mapaUbicacion').setView([info.lat, info.lon], 17);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(mapaLeaflet);
+        marcadorLeaflet = L.marker([info.lat, info.lon]).addTo(mapaLeaflet);
+    } else {
+        mapaLeaflet.setView([info.lat, info.lon], 17);
+        marcadorLeaflet.setLatLng([info.lat, info.lon]);
+    }
+    marcadorLeaflet.bindPopup(
+        '<strong>' + escapeHtml(info.nombre) + '</strong><br>' +
+        escapeHtml(((info.fecha || '') + ' ' + (info.hora || '')).trim())
+    ).openPopup();
+    setTimeout(function () { if (mapaLeaflet) mapaLeaflet.invalidateSize(); }, 120);
+}
+
+async function buscarDireccionUbicacion(lat, lon) {
+    const el = document.getElementById('ubiDireccion');
+    const seq = ++secuenciaDireccion;
+    try {
+        const res = await fetch(
+            'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) +
+            '&lon=' + encodeURIComponent(lon) + '&zoom=18&addressdetails=1&accept-language=es'
+        );
+        const json = await res.json();
+        if (seq !== secuenciaDireccion) return;
+        el.innerText = (json && json.display_name) ? json.display_name : 'Dirección no disponible para estas coordenadas.';
+    } catch (e) {
+        if (seq !== secuenciaDireccion) return;
+        el.innerText = 'No se pudo obtener la dirección (sin conexión con el servicio de mapas).';
+    }
 }
 
 function syncSelectOptions(fromSelect, toSelect) {
