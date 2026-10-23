@@ -1,0 +1,271 @@
+{% extends "layout.html" %}
+
+{% block title %}Perfiles de acceso — Configuración{% endblock %}
+
+{% block extra_css %}
+<style>
+    .pa-layout { display: flex; gap: 1rem; min-height: 72vh; }
+    .pa-panel-izq {
+        flex: 0 0 38%; max-width: 38%; min-width: 280px;
+        display: flex; flex-direction: column;
+    }
+    .pa-panel-der {
+        flex: 1 1 62%; min-width: 0;
+        display: flex; flex-direction: column;
+    }
+    .pa-grilla {
+        flex: 1; min-height: 0; max-height: calc(72vh - 6rem); overflow: auto;
+        border: 1px solid #dee2e6; border-radius: 0.375rem; background: #fff;
+    }
+    .table-pa { font-size: 12px; margin-bottom: 0; }
+    .table-pa th, .table-pa td { padding: 0.3rem 0.45rem; vertical-align: middle; }
+    .table-pa thead th {
+        position: sticky; top: 0; background: #f8f9fa; z-index: 2;
+        box-shadow: 0 1px 0 #dee2e6;
+    }
+    .table-pa tbody tr.pa-row { cursor: pointer; }
+    .table-pa tbody tr.pa-row:hover { background: #f8f9fa; }
+    .table-pa tbody tr.pa-row.active { background: #cfe2ff; }
+    .pa-check-list {
+        flex: 1; min-height: 0; max-height: calc(72vh - 14rem); overflow: auto;
+        border: 1px solid #dee2e6; border-radius: 0.375rem; padding: 0.6rem 0.75rem;
+        background: #fff;
+    }
+    .pa-check-list .form-check { margin-bottom: 0.3rem; font-size: 12px; }
+    .pa-msg { min-height: 1.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-3">
+    <div class="card-body py-3">
+        <h5 class="mb-1">Perfiles de acceso</h5>
+        <div class="small text-muted">Cree perfiles y marque las opciones de menú que podrá ver cada perfil.</div>
+        <div id="msgPa" class="pa-msg small mt-2"></div>
+    </div>
+</div>
+
+<div class="pa-layout">
+    <div class="pa-panel-izq">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong class="small">Perfiles</strong>
+            <button type="button" class="btn btn-success btn-sm" id="btnNuevoPerfil">
+                <i class="bi bi-plus-lg"></i> Nuevo
+            </button>
+        </div>
+        <div class="input-group input-group-sm mb-2">
+            <input type="search" id="txtBuscarPerfil" class="form-control" placeholder="Buscar perfil..." autocomplete="off">
+            <button class="btn btn-outline-secondary" type="button" id="btnBuscarPerfil"><i class="bi bi-search"></i></button>
+        </div>
+        <div class="pa-grilla">
+            <table class="table table-sm table-hover table-pa">
+                <thead><tr><th>Código</th><th>Nombre</th><th>Opciones</th></tr></thead>
+                <tbody id="tbodyPerfiles"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="pa-panel-der">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong class="small">Opciones del perfil</strong>
+            <span id="lblPerfilActivo" class="small text-muted">Seleccione o cree un perfil</span>
+        </div>
+        <div class="row g-2 mb-2">
+            <div class="col-4">
+                <label class="form-label small mb-0">Código</label>
+                <input type="text" id="txtProfileCode" class="form-control form-control-sm" maxlength="30" autocomplete="off">
+            </div>
+            <div class="col-8">
+                <label class="form-label small mb-0">Nombre</label>
+                <input type="text" id="txtProfileName" class="form-control form-control-sm" maxlength="120" autocomplete="off">
+            </div>
+        </div>
+        <div class="small text-muted mb-1">Marque las opciones permitidas</div>
+        <div class="pa-check-list mb-2" id="chkMenus"></div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-sm" id="btnGuardarPerfil">
+                <i class="bi bi-save"></i> Guardar perfil
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-sm" id="btnEliminarPerfil" disabled>
+                <i class="bi bi-trash"></i> Eliminar
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" id="btnSelTodo">Todas</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSelNinguna">Ninguna</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', async function () {
+    const msg = document.getElementById('msgPa');
+    const tbodyPerfiles = document.getElementById('tbodyPerfiles');
+    const chkMenus = document.getElementById('chkMenus');
+    const txtCode = document.getElementById('txtProfileCode');
+    const txtName = document.getElementById('txtProfileName');
+    const btnEliminar = document.getElementById('btnEliminarPerfil');
+    const lblActivo = document.getElementById('lblPerfilActivo');
+
+    let menusCatalogo = [];
+    let modo = 'I';
+    let selectedProfile = '';
+    let flagAdminSelected = false;
+
+    function toastOk(t) { if (window.HmUi) HmUi.exito(t); else alert(t); }
+    function toastErr(t) { if (window.HmUi) HmUi.error(t); else alert(t); }
+
+    async function postJson(url, body) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.error) throw new Error(data.error || 'Error en la solicitud.');
+        return data;
+    }
+
+    function esc(v) {
+        return String(v == null ? '' : v)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function renderMenusChecks(selectedSet) {
+        const sel = selectedSet || new Set();
+        chkMenus.innerHTML = menusCatalogo.map((m) => {
+            const code = String(m.menucode || '');
+            const title = String(m.title || code);
+            const parent = String(m.parentcode || '');
+            const label = parent ? `${parent} / ${title}` : title;
+            const checked = sel.has(code) ? ' checked' : '';
+            return `<div class="form-check">
+                <input class="form-check-input pa-menu-chk" type="checkbox" value="${esc(code)}" id="m_${esc(code)}"${checked}>
+                <label class="form-check-label" for="m_${esc(code)}">${esc(label)}</label>
+            </div>`;
+        }).join('') || '<div class="text-muted small">Sin opciones en el catálogo</div>';
+    }
+
+    function selectedMenusCsv() {
+        return Array.from(chkMenus.querySelectorAll('.pa-menu-chk:checked'))
+            .map((el) => el.value)
+            .join(',');
+    }
+
+    async function cargarMenus() {
+        const data = await postJson('/api/perfiles-acceso/menus', {});
+        menusCatalogo = Array.isArray(data.rows) ? data.rows : [];
+        renderMenusChecks(new Set());
+    }
+
+    async function cargarPerfiles() {
+        const data = await postJson('/api/perfiles-acceso/perfiles/listado', {
+            busqueda: document.getElementById('txtBuscarPerfil').value.trim()
+        });
+        const perfiles = Array.isArray(data.rows) ? data.rows : [];
+        tbodyPerfiles.innerHTML = perfiles.map((p) => `
+            <tr class="pa-row ${p.profilecode === selectedProfile ? 'active' : ''}" data-code="${esc(p.profilecode)}">
+                <td><strong>${esc(p.profilecode)}</strong>${p.flagadmin === 'Y' ? ' <span class="badge text-bg-primary">ADMIN</span>' : ''}</td>
+                <td>${esc(p.name || '')}</td>
+                <td class="text-center">${p.menus != null ? p.menus : 0}</td>
+            </tr>
+        `).join('') || '<tr><td colspan="3" class="text-center text-muted">Sin perfiles</td></tr>';
+
+        tbodyPerfiles.querySelectorAll('tr.pa-row').forEach((tr) => {
+            tr.addEventListener('click', () => seleccionarPerfil(tr.dataset.code));
+        });
+    }
+
+    async function seleccionarPerfil(code) {
+        selectedProfile = code;
+        modo = 'U';
+        const data = await postJson('/api/perfiles-acceso/perfiles/obtener', { profilecode: code });
+        const p = data.perfil || {};
+        flagAdminSelected = String(p.flagadmin || '').toUpperCase() === 'Y';
+        txtCode.value = p.profilecode || code;
+        txtCode.readOnly = true;
+        txtName.value = p.name || '';
+        lblActivo.textContent = `Editando: ${txtCode.value}`;
+        const sel = new Set((data.menus || []).filter((m) => Number(m.selected) === 1).map((m) => String(m.menucode)));
+        renderMenusChecks(sel);
+        btnEliminar.disabled = flagAdminSelected;
+        await cargarPerfiles();
+    }
+
+    function nuevoPerfil() {
+        selectedProfile = '';
+        modo = 'I';
+        flagAdminSelected = false;
+        txtCode.value = '';
+        txtCode.readOnly = false;
+        txtName.value = '';
+        lblActivo.textContent = 'Nuevo perfil';
+        renderMenusChecks(new Set());
+        btnEliminar.disabled = true;
+        tbodyPerfiles.querySelectorAll('tr.pa-row').forEach((tr) => tr.classList.remove('active'));
+        txtCode.focus();
+    }
+
+    async function guardarPerfil() {
+        const profilecode = txtCode.value.trim().toUpperCase();
+        const name = txtName.value.trim();
+        if (!profilecode || !name) {
+            toastErr('Indique código y nombre del perfil.');
+            return;
+        }
+        try {
+            msg.textContent = 'Guardando perfil...';
+            const data = await postJson('/api/perfiles-acceso/perfiles/guardar', {
+                modo,
+                profilecode,
+                name,
+                menus: selectedMenusCsv()
+            });
+            msg.textContent = '';
+            toastOk(data.mensaje || 'Perfil guardado.');
+            await cargarPerfiles();
+            await seleccionarPerfil(profilecode);
+        } catch (e) {
+            msg.textContent = '';
+            toastErr(e.message);
+        }
+    }
+
+    async function eliminarPerfil() {
+        if (!selectedProfile || flagAdminSelected) return;
+        if (!confirm(`¿Eliminar el perfil ${selectedProfile}?`)) return;
+        try {
+            const data = await postJson('/api/perfiles-acceso/perfiles/eliminar', { profilecode: selectedProfile });
+            toastOk(data.mensaje || 'Perfil eliminado.');
+            nuevoPerfil();
+            await cargarPerfiles();
+        } catch (e) {
+            toastErr(e.message);
+        }
+    }
+
+    document.getElementById('btnNuevoPerfil').addEventListener('click', nuevoPerfil);
+    document.getElementById('btnGuardarPerfil').addEventListener('click', guardarPerfil);
+    document.getElementById('btnEliminarPerfil').addEventListener('click', eliminarPerfil);
+    document.getElementById('btnBuscarPerfil').addEventListener('click', cargarPerfiles);
+    document.getElementById('txtBuscarPerfil').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); cargarPerfiles(); }
+    });
+    document.getElementById('btnSelTodo').addEventListener('click', () => {
+        chkMenus.querySelectorAll('.pa-menu-chk').forEach((el) => { el.checked = true; });
+    });
+    document.getElementById('btnSelNinguna').addEventListener('click', () => {
+        chkMenus.querySelectorAll('.pa-menu-chk').forEach((el) => { el.checked = false; });
+    });
+
+    try {
+        await cargarMenus();
+        await cargarPerfiles();
+        nuevoPerfil();
+    } catch (e) {
+        toastErr(e.message);
+    }
+});
+</script>
+{% endblock %}

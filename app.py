@@ -93,12 +93,73 @@ def format_pct(value):
 
 @app.context_processor
 def inject_now():
+    from web_access import session_can_menu
+
     sql_db = ''
     try:
         sql_db = get_active_database()
     except Exception:
         sql_db = ''
-    return {'now': datetime.now(), 'sql_database': sql_db}
+
+    def can_menu(code):
+        if not current_user.is_authenticated:
+            return False
+        return session_can_menu(session, code)
+
+    return {
+        'now': datetime.now(),
+        'sql_database': sql_db,
+        'web_admin': bool(session.get('web_admin')) if current_user.is_authenticated else False,
+        'web_access_unrestricted': bool(session.get('web_access_unrestricted', True))
+            if current_user.is_authenticated else True,
+        'can_menu': can_menu,
+    }
+
+
+def _load_web_access_into_session(userid=None):
+    """Carga perfiles de menú en session (soft: falla → unrestricted)."""
+    from web_access import apply_access_to_session, load_user_web_access
+    uid = (userid or getattr(current_user, 'id', None) or session.get('login_userid') or '').strip()
+    state = load_user_web_access(uid, get_db_connection)
+    apply_access_to_session(session, state)
+    return state
+
+
+@app.before_request
+def ensure_and_enforce_web_access():
+    """Carga permisos si faltan y bloquea rutas sin menú asignado."""
+    from web_access import first_allowed_endpoint, resolve_menu_for_request, session_can_menu
+
+    if not current_user.is_authenticated:
+        return None
+
+    if 'web_access_unrestricted' not in session:
+        _load_web_access_into_session()
+
+    ep = request.endpoint
+    path = request.path or ''
+    if path.startswith('/static/'):
+        return None
+
+    menu_code = resolve_menu_for_request(ep, path)
+    if not menu_code:
+        return None
+    if session_can_menu(session, menu_code):
+        return None
+    if path.startswith('/api/') and menu_code in ('perfiles_acceso', 'asignar_perfiles') and (
+        session_can_menu(session, 'perfiles_acceso') or session_can_menu(session, 'asignar_perfiles')
+    ):
+        return None
+
+    if path.startswith('/api/'):
+        return jsonify({"error": "No tiene permiso para esta opción."}), 403
+
+    flash('No tiene permiso para acceder a esa opción.', 'warning')
+    target = first_allowed_endpoint(session)
+    try:
+        return redirect(url_for(target))
+    except Exception:
+        return redirect(url_for('dashboard'))
 
 
 def _as_date(value):
@@ -201,6 +262,7 @@ def login_post():
         login_user(user)
         session['login_userid'] = username
         ensure_user_session()
+        _load_web_access_into_session(username)
         return redirect(url_for('dashboard'))
     flash('Usuario o contraseña incorrectos.', 'error')
     return redirect(url_for('login'))
@@ -824,6 +886,20 @@ def configurar_alertas():
         companies=companies,
         default_company=default_company,
     )
+
+
+@app.route('/perfiles-acceso')
+@login_required
+def perfiles_acceso_page():
+    ensure_user_session()
+    return render_template('maestro_perfiles_acceso.html')
+
+
+@app.route('/asignar-perfiles')
+@login_required
+def asignar_perfiles_page():
+    ensure_user_session()
+    return render_template('maestro_asignar_perfiles.html')
 
 
 @app.route('/seguridad/acceso-marcador')
@@ -2088,6 +2164,407 @@ def reporte_planilla_vertical_post():
     except Exception as e:
         logging.exception("reporte_planilla_vertical_post")
         return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+# --- Perfiles de acceso / Asignar perfiles (mismo modelo WEB_* de Planillas) ---
+
+def _xlastuser_id():
+    return str(getattr(current_user, 'id', '') or session.get('login_userid') or '')[:20]
+
+
+def _sp_error_message(exc):
+    err = str(exc)
+    if 'RAISERROR' in err or '50000' in err:
+        parts = err.split(']')
+        if len(parts) > 1:
+            err = parts[-1].strip(" ()'\"")
+    return err
+
+
+def _dicts_first_nonempty_resultset(cursor):
+    while True:
+        if cursor.description:
+            cols = [str(c[0]).strip() for c in cursor.description]
+            rows = cursor.fetchall()
+            if rows:
+                out = []
+                for row in rows:
+                    rd = {}
+                    for i, cname in enumerate(cols):
+                        key = (cname or f"col{i}").lower()
+                        rd[key] = row[i]
+                    out.append(rd)
+                return out
+        if not cursor.nextset():
+            break
+    return []
+
+
+def _require_perfiles_acceso_admin(menu_code='perfiles_acceso'):
+    from web_access import session_can_menu
+    if not current_user.is_authenticated:
+        return False
+    if session.get('web_access_unrestricted'):
+        return True
+    if session_can_menu(session, menu_code):
+        return True
+    return session_can_menu(session, 'perfiles_acceso') or session_can_menu(session, 'asignar_perfiles')
+
+
+def _merge_menus_asistencia_con_otros(profilecode, menus_asistencia_csv):
+    """
+    Al guardar desde Asistencia, conserva menús de Planillas del mismo perfil
+    (hm_quimica comparte WEB_*). Solo reemplaza el subconjunto de Asistencia.
+    """
+    from web_access import ASISTENCIA_MENU_CODES
+
+    nuevos = [
+        m.strip() for m in str(menus_asistencia_csv or '').split(',')
+        if m.strip() and m.strip() in ASISTENCIA_MENU_CODES
+    ]
+    otros = []
+    if profilecode:
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT MenuCode
+                FROM WEB_AccessProfileMenu
+                WHERE ProfileCode = ?
+                """,
+                (profilecode,),
+            )
+            for row in cursor.fetchall():
+                code = str(row[0] or '').strip()
+                if code and code not in ASISTENCIA_MENU_CODES:
+                    otros.append(code)
+        except Exception:
+            logging.exception("_merge_menus_asistencia_con_otros profile=%s", profilecode)
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    merged = []
+    seen = set()
+    for code in otros + nuevos:
+        if code not in seen:
+            seen.add(code)
+            merged.append(code)
+    return ','.join(merged)
+
+
+@app.route('/api/perfiles-acceso/menus', methods=['POST'])
+@login_required
+def api_perfiles_acceso_menus():
+    from web_access import ASISTENCIA_MENU_CODES
+
+    if not _require_perfiles_acceso_admin('perfiles_acceso'):
+        return jsonify({"error": "No tiene permiso para administrar perfiles."}), 403
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("EXEC sp_web_listar_menu_options_web")
+        rows = _dicts_first_nonempty_resultset(cursor)
+        return jsonify({
+            "rows": [
+                {
+                    "menucode": _jsonable_value(r.get('menucode')),
+                    "title": _jsonable_value(r.get('title')),
+                    "parentcode": _jsonable_value(r.get('parentcode')),
+                    "sortorder": _jsonable_value(r.get('sortorder')),
+                }
+                for r in rows
+                if str(r.get('menucode') or '').strip() in ASISTENCIA_MENU_CODES
+            ]
+        })
+    except Exception as e:
+        logging.exception("api_perfiles_acceso_menus")
+        return jsonify({"error": _sp_error_message(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/perfiles-acceso/perfiles/listado', methods=['POST'])
+@login_required
+def api_perfiles_acceso_listado():
+    if not _require_perfiles_acceso_admin('perfiles_acceso'):
+        return jsonify({"error": "No tiene permiso para administrar perfiles."}), 403
+    body = request.get_json(silent=True) or {}
+    busqueda = str(body.get('busqueda') or '').strip()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_web_listar_access_profiles_web @busqueda=?",
+            (busqueda or None,),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        return jsonify({
+            "rows": [
+                {
+                    "profilecode": _jsonable_value(r.get('profilecode')),
+                    "name": _jsonable_value(r.get('name')),
+                    "flagadmin": _jsonable_value(r.get('flagadmin')),
+                    "menus": _jsonable_value(r.get('menus')),
+                    "usuarios": _jsonable_value(r.get('usuarios')),
+                }
+                for r in rows
+            ]
+        })
+    except Exception as e:
+        logging.exception("api_perfiles_acceso_listado")
+        return jsonify({"error": _sp_error_message(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/perfiles-acceso/perfiles/obtener', methods=['POST'])
+@login_required
+def api_perfiles_acceso_obtener():
+    from web_access import ASISTENCIA_MENU_CODES
+
+    if not _require_perfiles_acceso_admin('perfiles_acceso'):
+        return jsonify({"error": "No tiene permiso para administrar perfiles."}), 403
+    body = request.get_json(silent=True) or {}
+    profilecode = str(body.get('profilecode') or '').strip().upper()
+    if not profilecode:
+        return jsonify({"error": "Indique el perfil."}), 400
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_web_obtener_access_profile_web @profilecode=?",
+            (profilecode,),
+        )
+        perfil_rows = []
+        menu_rows = []
+        if cursor.description:
+            cols = [str(c[0]).strip().lower() for c in cursor.description]
+            for row in cursor.fetchall():
+                perfil_rows.append({cols[i]: row[i] for i in range(len(cols))})
+        if cursor.nextset() and cursor.description:
+            cols = [str(c[0]).strip().lower() for c in cursor.description]
+            for row in cursor.fetchall():
+                menu_rows.append({cols[i]: row[i] for i in range(len(cols))})
+        perfil = perfil_rows[0] if perfil_rows else {}
+        return jsonify({
+            "perfil": {
+                "profilecode": _jsonable_value(perfil.get('profilecode')),
+                "name": _jsonable_value(perfil.get('name')),
+                "flagadmin": _jsonable_value(perfil.get('flagadmin')),
+            },
+            "menus": [
+                {
+                    "menucode": _jsonable_value(m.get('menucode')),
+                    "title": _jsonable_value(m.get('title')),
+                    "parentcode": _jsonable_value(m.get('parentcode')),
+                    "selected": _jsonable_value(m.get('selected')),
+                }
+                for m in menu_rows
+                if str(m.get('menucode') or '').strip() in ASISTENCIA_MENU_CODES
+            ],
+        })
+    except Exception as e:
+        logging.exception("api_perfiles_acceso_obtener")
+        return jsonify({"error": _sp_error_message(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/perfiles-acceso/perfiles/guardar', methods=['POST'])
+@login_required
+def api_perfiles_acceso_guardar():
+    if not _require_perfiles_acceso_admin('perfiles_acceso'):
+        return jsonify({"error": "No tiene permiso para administrar perfiles."}), 403
+    body = request.get_json(silent=True) or {}
+    modo = str(body.get('modo') or 'I').strip().upper()
+    profilecode = str(body.get('profilecode') or '').strip().upper()
+    name = str(body.get('name') or '').strip()
+    menus_in = str(body.get('menus') or '').strip()
+    if not profilecode or not name:
+        return jsonify({"error": "Indique código y nombre."}), 400
+    menus = _merge_menus_asistencia_con_otros(
+        profilecode if modo == 'U' else None,
+        menus_in,
+    )
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_web_guardar_access_profile_web "
+            "@modo=?, @profilecode=?, @name=?, @menus=?, @xlastuser=?",
+            (modo, profilecode, name, menus or None, _xlastuser_id()),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        conn.commit()
+        _load_web_access_into_session()
+        row = rows[0] if rows else {}
+        return jsonify({
+            "ok": True,
+            "profilecode": _jsonable_value(row.get('profilecode')),
+            "mensaje": _jsonable_value(row.get('mensaje')) or "Perfil guardado.",
+        })
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.exception("api_perfiles_acceso_guardar")
+        return jsonify({"error": _sp_error_message(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/perfiles-acceso/perfiles/eliminar', methods=['POST'])
+@login_required
+def api_perfiles_acceso_eliminar():
+    if not _require_perfiles_acceso_admin('perfiles_acceso'):
+        return jsonify({"error": "No tiene permiso para administrar perfiles."}), 403
+    body = request.get_json(silent=True) or {}
+    profilecode = str(body.get('profilecode') or '').strip().upper()
+    if not profilecode:
+        return jsonify({"error": "Indique el perfil."}), 400
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_web_eliminar_access_profile_web @profilecode=?",
+            (profilecode,),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        conn.commit()
+        row = rows[0] if rows else {}
+        return jsonify({
+            "ok": True,
+            "profilecode": _jsonable_value(row.get('profilecode')),
+            "mensaje": _jsonable_value(row.get('mensaje')) or "Perfil eliminado.",
+        })
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.exception("api_perfiles_acceso_eliminar")
+        return jsonify({"error": _sp_error_message(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/perfiles-acceso/usuarios/listado', methods=['POST'])
+@login_required
+def api_perfiles_acceso_usuarios_listado():
+    if not _require_perfiles_acceso_admin('asignar_perfiles'):
+        return jsonify({"error": "No tiene permiso para asignar perfiles."}), 403
+    body = request.get_json(silent=True) or {}
+    busqueda = str(body.get('busqueda') or '').strip()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_web_listar_usuarios_access_web @busqueda=?",
+            (busqueda or None,),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        return jsonify({
+            "rows": [
+                {
+                    "userid": _jsonable_value(r.get('userid')),
+                    "nombre": _jsonable_value(r.get('nombre')),
+                    "profilecode": _jsonable_value(r.get('profilecode')),
+                    "profilename": _jsonable_value(r.get('profilename')),
+                    "flagadmin": _jsonable_value(r.get('flagadmin')),
+                }
+                for r in rows
+            ]
+        })
+    except Exception as e:
+        logging.exception("api_perfiles_acceso_usuarios_listado")
+        return jsonify({"error": _sp_error_message(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/perfiles-acceso/usuarios/asignar', methods=['POST'])
+@login_required
+def api_perfiles_acceso_usuarios_asignar():
+    if not _require_perfiles_acceso_admin('asignar_perfiles'):
+        return jsonify({"error": "No tiene permiso para asignar perfiles."}), 403
+    body = request.get_json(silent=True) or {}
+    userid = str(body.get('userid') or '').strip()
+    profile_raw = body.get('profilecode')
+    profilecode = str(profile_raw).strip().upper() if profile_raw not in (None, '') else None
+    if not userid:
+        return jsonify({"error": "Indique el usuario."}), 400
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_web_asignar_user_access_profile_web "
+            "@userid=?, @profilecode=?, @xlastuser=?",
+            (userid, profilecode, _xlastuser_id()),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        conn.commit()
+        if userid.lower() == str(session.get('login_userid') or current_user.id or '').lower():
+            _load_web_access_into_session(userid)
+        row = rows[0] if rows else {}
+        return jsonify({
+            "ok": True,
+            "userid": _jsonable_value(row.get('userid')),
+            "profilecode": _jsonable_value(row.get('profilecode')),
+            "mensaje": _jsonable_value(row.get('mensaje')) or "Asignación guardada.",
+        })
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.exception("api_perfiles_acceso_usuarios_asignar")
+        return jsonify({"error": _sp_error_message(e)}), 500
     finally:
         if conn:
             try:
