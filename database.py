@@ -215,6 +215,29 @@ def get_db_connection(database=None):
     return DatabaseConfig.get_connection(database=database)
 
 
+def _is_admin_service_login(userid, database):
+    """
+    Usuario de servicio adminquimica en hm_quimica: entra sin SY_Person / PR_Employee.
+    """
+    return (
+        str(userid or '').strip().lower() == 'adminquimica'
+        and str(database or '').strip().lower() == 'hm_quimica'
+    )
+
+
+def _admin_service_session_defaults():
+    """company/person por defecto cuando no hay persona asociada."""
+    return {
+        'company': 'BGT',
+        # '0' evita reconsultar en cada request (ensure_user_session trata '' como vacío)
+        'person': '0',
+        'nombres': 'Administrador',
+        'primerapellido': '',
+        'segundoapellido': '',
+        'email': None,
+    }
+
+
 class User(UserMixin):
     """Clase de usuario para Flask-Login"""
     
@@ -249,7 +272,27 @@ class User(UserMixin):
         try:
             conn = DatabaseConfig.get_connection(database=target_db)
             cursor = conn.cursor()
-            
+
+            # adminquimica @ hm_quimica: solo SY_User + PasswordWeb (+ perfil web)
+            if _is_admin_service_login(username, target_db):
+                cursor.execute(
+                    """
+                    SELECT u.UserID
+                    FROM SY_User u
+                    INNER JOIN SY_UserProfile up ON up.UserID = u.UserID
+                    WHERE u.UserID = ? AND u.PasswordWeb = ?
+                    """,
+                    (username, password),
+                )
+                row = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                print(f"DEBUG: Login servicio adminquimica en {target_db}: {'OK' if row else 'FAIL'}")
+                if row:
+                    persist_client_database(target_db)
+                    return User(username, username, None, 'Administrador')
+                return None
+
             # Query para validar usuario y contraseña
             # Ajusta el nombre de la tabla y columnas según tu esquema
             query = """
@@ -298,9 +341,32 @@ class User(UserMixin):
             User object si existe, None en caso contrario
         """
         try:
+            active_db = ''
+            try:
+                active_db = get_active_database() or ''
+            except Exception:
+                active_db = ''
+
             conn = DatabaseConfig.get_connection()
             cursor = conn.cursor()
-            
+
+            if _is_admin_service_login(user_id, active_db):
+                cursor.execute(
+                    """
+                    SELECT u.UserID
+                    FROM SY_User u
+                    INNER JOIN SY_UserProfile up ON up.UserID = u.UserID
+                    WHERE u.UserID = ?
+                    """,
+                    (user_id,),
+                )
+                row = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                if row:
+                    return User(user_id, user_id, None, 'Administrador')
+                return None
+
             query = """
               SELECT 
                 u.UserID,
@@ -357,6 +423,17 @@ def get_datos_usuario_web(userid):
         'BancoSalario', 'CuentaSalario', 'BancoCTS', 'CuentaCTS'
     ]
     try:
+        active_db = ''
+        try:
+            active_db = get_active_database() or ''
+        except Exception:
+            active_db = ''
+
+        # Servicio adminquimica: sin SY_Person → defaults de sesión
+        if _is_admin_service_login(userid, active_db):
+            print(f'Buscando datos para: {userid} (login servicio → defaults)')
+            return _admin_service_session_defaults()
+
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
         cursor.execute("EXEC sp_pr_datosusuario_web ?", (userid,))
