@@ -346,11 +346,13 @@ class User(UserMixin):
                 active_db = get_active_database() or ''
             except Exception:
                 active_db = ''
+            if not active_db:
+                active_db = resolve_client_database(user_id) or ''
 
-            conn = DatabaseConfig.get_connection()
-            cursor = conn.cursor()
-
+            # adminquimica @ hm_quimica: no depende de SY_Person
             if _is_admin_service_login(user_id, active_db):
+                conn = DatabaseConfig.get_connection(database=active_db)
+                cursor = conn.cursor()
                 cursor.execute(
                     """
                     SELECT u.UserID
@@ -364,9 +366,12 @@ class User(UserMixin):
                 cursor.close()
                 conn.close()
                 if row:
+                    persist_client_database(active_db)
                     return User(user_id, user_id, None, 'Administrador')
                 return None
 
+            conn = DatabaseConfig.get_connection()
+            cursor = conn.cursor()
             query = """
               SELECT 
                 u.UserID,
