@@ -40,5 +40,7 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Puerto para Render
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000"]
+# Render inyecta PORT; hay que enlazar a ese valor (no hardcodear 10000).
+ENV PORT=10000
+EXPOSE 10000
+CMD ["sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT:-10000} --timeout 120 --workers ${WEB_CONCURRENCY:-1}"]
