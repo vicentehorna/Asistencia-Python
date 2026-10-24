@@ -442,22 +442,35 @@ document.addEventListener('DOMContentLoaded', async function () {
                     const res = await fetch(URL_APROBAR_NIVEL, {
                         method: 'POST',
                         credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
                         body: JSON.stringify({
                             solicitud_id: btn.getAttribute('data-solicitud-id'),
                             person: btn.getAttribute('data-person-dni'),
                         }),
                     });
-                    const data = await res.json().catch(function () { return {}; });
+                    const raw = await res.text();
+                    let data = {};
+                    try { data = raw ? JSON.parse(raw) : {}; } catch (e1) { data = {}; }
                     if (!res.ok) {
-                        alert((data && data.error) || 'No se pudo aprobar el nivel.');
+                        const detail = (data && data.error)
+                            || (raw && raw.indexOf('<') === -1 ? raw.slice(0, 240) : '')
+                            || ('No se pudo aprobar (HTTP ' + res.status + ').');
+                        alert(detail);
+                        return;
+                    }
+                    if (!(data && data.ok)) {
+                        alert((data && data.error) || 'Respuesta inválida del servidor al aprobar.');
                         return;
                     }
                     alert((data && data.message) || 'Nivel aprobado.');
                     document.getElementById('btnBuscarAprobarVac').click();
                 } catch (err) {
                     console.error(err);
-                    alert('Error de red al aprobar.');
+                    alert('Error de red al aprobar: ' + (err && err.message ? err.message : String(err)));
                 } finally {
                     btn.disabled = false;
                 }

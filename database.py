@@ -3659,6 +3659,12 @@ def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_act
 
 
 def _wf_marcar_paso(cursor, company, person, line, nivel, estado, user_id, observacion=None):
+    """Marca el paso. No confiar en cursor.rowcount (pyodbc/SQL Server + triggers)."""
+    cia = str(company or '').strip()
+    per = str(person or '').strip()
+    line_i = int(line)
+    nivel_i = int(nivel)
+    est = str(estado).upper()[:1]
     cursor.execute(
         """
         UPDATE dbo.WF_SolicitudPaso
@@ -3669,16 +3675,101 @@ def _wf_marcar_paso(cursor, company, person, line, nivel, estado, user_id, obser
         WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ? AND Estado = 'P'
         """,
         (
-            str(estado).upper()[:1],
+            est,
             str(user_id or '').strip()[:20],
             (observacion or '')[:500] or None,
-            str(company or '').strip(),
-            str(person or '').strip(),
-            int(line),
-            int(nivel),
+            cia, per, line_i, nivel_i,
         ),
     )
-    return cursor.rowcount > 0
+    cursor.execute(
+        """
+        SELECT Estado FROM dbo.WF_SolicitudPaso
+        WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ?
+        """,
+        (cia, per, line_i, nivel_i),
+    )
+    row = cursor.fetchone()
+    return bool(row) and str(row[0] or '').strip().upper() == est
+
+
+def _wf_cerrar_solicitud_aprobada(cursor, pk, company, person, line, user, comments=None):
+    """Pasa la solicitud a status A. Verifica con SELECT (rowcount no es fiable)."""
+    cia = str(company or '').strip()
+    per = str(person or '').strip()
+    line_i = int(line)
+    user_s = str(user or '').strip()[:20]
+    if pk == 'Line':
+        if comments:
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'A',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    Comments = ?,
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
+                """,
+                (user_s, comments, user_s, line_i, cia, per),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'A',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
+                """,
+                (user_s, user_s, line_i, cia, per),
+            )
+        cursor.execute(
+            """
+            SELECT status FROM PR_SolicitudVacaciones
+            WHERE Line = ? AND Company = ? AND Person = ?
+            """,
+            (line_i, cia, per),
+        )
+    else:
+        if comments:
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'A',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    Comments = ?,
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Id = ? AND Company = ? AND status = 'P'
+                """,
+                (user_s, comments, user_s, line_i, cia),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'A',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Id = ? AND Company = ? AND status = 'P'
+                """,
+                (user_s, user_s, line_i, cia),
+            )
+        cursor.execute(
+            """
+            SELECT status FROM PR_SolicitudVacaciones
+            WHERE Id = ? AND Company = ?
+            """,
+            (line_i, cia),
+        )
+    row = cursor.fetchone()
+    return bool(row) and str(row[0] or '').strip().upper() == 'A'
 
 
 def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_actor,
@@ -3717,68 +3808,17 @@ def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_a
             drive_id = str(drive_file_id or '').strip()
             if drive_id:
                 comments = f'SUSTENTO_DRIVE:{drive_id}'[:255]
-            if pk == 'Line':
-                if comments:
-                    cursor.execute(
-                        """
-                        UPDATE PR_SolicitudVacaciones
-                        SET status = 'A',
-                            ApprovalUser = ?,
-                            ApprovalDate = GETDATE(),
-                            Comments = ?,
-                            xlastuser = ?,
-                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
-                        WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
-                        """,
-                        (user, comments, user, line_i, cia, per),
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        UPDATE PR_SolicitudVacaciones
-                        SET status = 'A',
-                            ApprovalUser = ?,
-                            ApprovalDate = GETDATE(),
-                            xlastuser = ?,
-                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
-                        WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
-                        """,
-                        (user, user, line_i, cia, per),
-                    )
-            else:
-                if comments:
-                    cursor.execute(
-                        """
-                        UPDATE PR_SolicitudVacaciones
-                        SET status = 'A',
-                            ApprovalUser = ?,
-                            ApprovalDate = GETDATE(),
-                            Comments = ?,
-                            xlastuser = ?,
-                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
-                        WHERE Id = ? AND Company = ? AND status = 'P'
-                        """,
-                        (user, comments, user, line_i, cia),
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        UPDATE PR_SolicitudVacaciones
-                        SET status = 'A',
-                            ApprovalUser = ?,
-                            ApprovalDate = GETDATE(),
-                            xlastuser = ?,
-                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
-                        WHERE Id = ? AND Company = ? AND status = 'P'
-                        """,
-                        (user, user, line_i, cia),
-                    )
-            if cursor.rowcount <= 0:
+            if not _wf_cerrar_solicitud_aprobada(cursor, pk, cia, per, line_i, user, comments):
                 conn.rollback()
                 return False, 'No se pudo cerrar la solicitud (ya no está pendiente).', info
             msg = 'Solicitud aprobada en todos los niveles.'
+            resumen = {
+                'codigo': 'APROBADO', 'label': 'Aprobado', 'chip': 'success',
+                'nivel_actual': info.get('resumen', {}).get('total_niveles'),
+                'total_niveles': info.get('resumen', {}).get('total_niveles'),
+                'detalle': 'Aprobado',
+            }
         else:
-            # Mantener P; opcionalmente anotar xlastuser
             if pk == 'Line':
                 cursor.execute(
                     """
@@ -3793,15 +3833,33 @@ def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_a
                 f"Nivel {pend.get('Nivel')} aprobado "
                 f"({pend.get('Descripcion') or ''}). Pasa al siguiente nivel."
             )
+            total = int((info.get('resumen') or {}).get('total_niveles') or 0)
+            siguiente = int(pend.get('Nivel') or 0) + 1
+            resumen = {
+                'codigo': 'EN_APROBACION',
+                'label': f'En aprobación ({siguiente}/{total})' if total else 'En aprobación',
+                'chip': 'info',
+                'nivel_actual': siguiente,
+                'total_niveles': total,
+                'detalle': f'Nivel {siguiente}/{total}' if total else 'Siguiente nivel',
+            }
 
         conn.commit()
-        cursor.close()
-        conn.close()
-        info2 = resolver_accion_flujo_vacaciones(
-            company, person, line, person_actor, profilecode,
-            menus=menus, unrestricted=unrestricted, web_admin=web_admin,
-        )
-        return True, msg, info2
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = None
+        info_out = dict(info)
+        info_out['resumen'] = resumen
+        info_out['can_approve'] = False
+        info_out['can_reject'] = False
+        info_out['paso_pendiente'] = None
+        return True, msg, info_out
     except Exception as e:
         print(f'Error en aprobar_paso_flujo_vacaciones: {e}')
         if conn:
@@ -3873,6 +3931,13 @@ def rechazar_paso_flujo_vacaciones(company, person, line, approval_user, person_
                 """,
                 (user, motivo[:255], user, line_i, cia, per),
             )
+            cursor.execute(
+                """
+                SELECT status FROM PR_SolicitudVacaciones
+                WHERE Line = ? AND Company = ? AND Person = ?
+                """,
+                (line_i, cia, per),
+            )
         else:
             cursor.execute(
                 """
@@ -3887,12 +3952,27 @@ def rechazar_paso_flujo_vacaciones(company, person, line, approval_user, person_
                 """,
                 (user, motivo[:255], user, line_i, cia),
             )
-        if cursor.rowcount <= 0:
+            cursor.execute(
+                """
+                SELECT status FROM PR_SolicitudVacaciones
+                WHERE Id = ? AND Company = ?
+                """,
+                (line_i, cia),
+            )
+        row_st = cursor.fetchone()
+        if not row_st or str(row_st[0] or '').strip().upper() != 'R':
             conn.rollback()
             return False, 'No se pudo rechazar la solicitud (ya no está pendiente).', info
         conn.commit()
-        cursor.close()
-        conn.close()
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = None
         return True, 'Solicitud rechazada.', info
     except Exception as e:
         print(f'Error en rechazar_paso_flujo_vacaciones: {e}')

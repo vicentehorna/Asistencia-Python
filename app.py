@@ -83,6 +83,22 @@ sys.stdout.reconfigure(line_buffering=True)
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+
+@login_manager.unauthorized_handler
+def _unauthorized_json_friendly():
+    """Evita redirect HTML en fetch/XHR de aprobación (aparecía como 'error de red')."""
+    path = request.path or ''
+    wants_json = (
+        path.startswith('/api/')
+        or path.startswith('/aprobar-vacaciones')
+        or path.startswith('/rechazar-vacaciones')
+        or path.startswith('/reporte_aprobar_vacaciones')
+        or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    )
+    if wants_json:
+        return jsonify({'error': 'Sesión expirada. Vuelva a iniciar sesión.'}), 401
+    return redirect(url_for('login'))
 login_manager.login_message_category = 'info'
 
 @app.before_request
@@ -194,7 +210,15 @@ def ensure_and_enforce_web_access():
     ):
         return None
 
-    if path.startswith('/api/'):
+    # Endpoints JSON de aprobación: nunca redirigir (el fetch del browser lo toma como error de red).
+    json_action_prefixes = (
+        '/api/',
+        '/aprobar-vacaciones-nivel',
+        '/rechazar-vacaciones-nivel',
+        '/aprobar-vacaciones-con-sustento',
+        '/reporte_aprobar_vacaciones',
+    )
+    if path.startswith(json_action_prefixes):
         return jsonify({"error": "No tiene permiso para esta opción."}), 403
 
     # Dashboard suele ser el landing por defecto: si no lo tiene, redirigir
@@ -1745,78 +1769,94 @@ def aprobar_vacaciones_con_sustento():
 @app.route('/aprobar-vacaciones-nivel', methods=['POST'])
 @login_required
 def aprobar_vacaciones_nivel():
-    """Aprueba el nivel pendiente del actor (jefe CC) sin sustento PDF."""
-    ensure_user_session()
-    body = request.get_json(silent=True) or {}
-    company = _reporte_compania_usuario_logueado()
-    solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
-    person_dni = str(
-        body.get('person') or body.get('person_dni')
-        or request.form.get('person') or request.form.get('person_dni') or ''
-    ).strip()
-    observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
-    if not company:
-        return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
-    if not solicitud_id or not person_dni:
-        return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
-    actor = _actor_flujo_vacaciones_ctx()
-    ok, msg, info = aprobar_paso_flujo_vacaciones(
-        company=company,
-        person=person_dni,
-        line=int(solicitud_id),
-        approval_user=current_user.id,
-        person_actor=actor['person_actor'],
-        profilecode=actor['profilecode'],
-        menus=actor['menus'],
-        unrestricted=actor['unrestricted'],
-        web_admin=actor['web_admin'],
-        observacion=observacion or None,
-    )
-    if not ok:
-        return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
-    resumen = (info or {}).get('resumen') or {}
-    return jsonify({
-        'ok': True,
-        'message': msg,
-        'flujo': resumen,
-    })
+    """Aprueba el nivel pendiente del actor (jefe CC / RRHH) sin sustento PDF."""
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
+        person_dni = str(
+            body.get('person') or body.get('person_dni')
+            or request.form.get('person') or request.form.get('person_dni') or ''
+        ).strip()
+        observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni:
+            return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = aprobar_paso_flujo_vacaciones(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion or None,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
+        resumen = (info or {}).get('resumen') or {}
+        return jsonify({
+            'ok': True,
+            'message': msg,
+            'flujo': resumen,
+        })
+    except Exception as e:
+        logging.exception('aprobar_vacaciones_nivel')
+        return jsonify({'error': f'Error al aprobar: {e}'}), 500
 
 
 @app.route('/rechazar-vacaciones-nivel', methods=['POST'])
 @login_required
 def rechazar_vacaciones_nivel():
     """Rechaza el nivel pendiente; motivo obligatorio."""
-    ensure_user_session()
-    body = request.get_json(silent=True) or {}
-    company = _reporte_compania_usuario_logueado()
-    solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
-    person_dni = str(
-        body.get('person') or body.get('person_dni')
-        or request.form.get('person') or request.form.get('person_dni') or ''
-    ).strip()
-    observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
-    if not company:
-        return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
-    if not solicitud_id or not person_dni:
-        return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
-    if not observacion:
-        return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
-    actor = _actor_flujo_vacaciones_ctx()
-    ok, msg, info = rechazar_paso_flujo_vacaciones(
-        company=company,
-        person=person_dni,
-        line=int(solicitud_id),
-        approval_user=current_user.id,
-        person_actor=actor['person_actor'],
-        profilecode=actor['profilecode'],
-        menus=actor['menus'],
-        unrestricted=actor['unrestricted'],
-        web_admin=actor['web_admin'],
-        observacion=observacion,
-    )
-    if not ok:
-        return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
-    return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
+        person_dni = str(
+            body.get('person') or body.get('person_dni')
+            or request.form.get('person') or request.form.get('person_dni') or ''
+        ).strip()
+        observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni:
+            return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+        if not observacion:
+            return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = rechazar_paso_flujo_vacaciones(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('rechazar_vacaciones_nivel')
+        return jsonify({'error': f'Error al rechazar: {e}'}), 500
 
 
 @app.route('/perfiles-acceso')
