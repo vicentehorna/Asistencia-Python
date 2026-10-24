@@ -407,6 +407,20 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if can_menu('detalle_vacaciones') %}
+                <li class="{{ 'active' if request.endpoint == 'reporte_vacaciones_detalle_page' else '' }}">
+                    <a href="{{ url_for('reporte_vacaciones_detalle_page') }}" title="Detalle de Vacaciones">
+                        <i class="bi bi-calendar-range"></i><span class="sidebar-link-text">Detalle de Vacaciones</span>
+                    </a>
+                </li>
+                {% endif %}
+                {% if can_menu('saldo_vacaciones') %}
+                <li class="{{ 'active' if request.endpoint == 'reporte_saldo_vacaciones_page' else '' }}">
+                    <a href="{{ url_for('reporte_saldo_vacaciones_page') }}" title="Saldo de Vacaciones">
+                        <i class="bi bi-pie-chart"></i><span class="sidebar-link-text">Saldo de Vacaciones</span>
+                    </a>
+                </li>
+                {% endif %}
 
                 <li class="py-0">
                     <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Seguridad</p>

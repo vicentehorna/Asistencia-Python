@@ -23,7 +23,9 @@ USING (VALUES
     ('reporte_resumen',      'Resumen de Asistencia',     'reportes',       310, 'reporte_resumen',        '/reporte-resumen',        'A'),
     ('reporte_consolidado',  'Consolidado de Asistencia', 'reportes',       320, 'reporte_consolidado',    '/reporte-consolidado',    'A'),
     ('acceso_marcador',      'Acceso al Marcador',        'seguridad',      410, 'acceso_marcador',        '/seguridad/acceso-marcador', 'A'),
-    ('solicitud_vacaciones', 'Solicitud de Vacaciones',   'portal_trabajador', 510, 'solicitud_vacaciones_page', '/solicitud-vacaciones', 'A')
+    ('solicitud_vacaciones', 'Solicitud de Vacaciones',   'portal_trabajador', 510, 'solicitud_vacaciones_page', '/solicitud-vacaciones', 'A'),
+    ('detalle_vacaciones',   'Detalle de Vacaciones',     'portal_trabajador', 520, 'reporte_vacaciones_detalle_page', '/reporte-vacaciones-detalle', 'A'),
+    ('saldo_vacaciones',     'Saldo de Vacaciones',       'portal_trabajador', 530, 'reporte_saldo_vacaciones_page', '/reporte-saldo-vacaciones', 'A')
 ) AS s (MenuCode, Title, ParentCode, SortOrder, Endpoint, RoutePrefix, Status)
 ON t.MenuCode = s.MenuCode
 WHEN MATCHED THEN
@@ -59,29 +61,42 @@ WHERE m.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador','solicitud_vacaciones'
+      'acceso_marcador','solicitud_vacaciones','detalle_vacaciones','saldo_vacaciones'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
         WHERE x.ProfileCode = 'ADMIN' AND x.MenuCode = m.MenuCode
   );
 
-/* Perfiles ya existentes: agregar menús de Asistencia (no quitar los de Planillas) */
+/* Perfiles ya existentes (excepto SIMPLE): agregar menús de Asistencia (no quitar Planillas) */
 INSERT INTO dbo.WEB_AccessProfileMenu (ProfileCode, MenuCode)
 SELECT p.ProfileCode, m.MenuCode
 FROM dbo.WEB_AccessProfile p
 CROSS JOIN dbo.WEB_MenuOption m
 WHERE p.Status = 'A'
+  AND p.ProfileCode <> 'SIMPLE'
   AND m.Status = 'A'
   AND m.MenuCode IN (
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador','solicitud_vacaciones'
+      'acceso_marcador','solicitud_vacaciones','detalle_vacaciones','saldo_vacaciones'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
         WHERE x.ProfileCode = p.ProfileCode AND x.MenuCode = m.MenuCode
+  );
+
+/* SIMPLE: solo Portal Trabajador (solicitud + reportes propios) */
+INSERT INTO dbo.WEB_AccessProfileMenu (ProfileCode, MenuCode)
+SELECT 'SIMPLE', m.MenuCode
+FROM dbo.WEB_MenuOption m
+WHERE m.Status = 'A'
+  AND m.MenuCode IN ('solicitud_vacaciones', 'detalle_vacaciones', 'saldo_vacaciones')
+  AND EXISTS (SELECT 1 FROM dbo.WEB_AccessProfile WHERE ProfileCode = 'SIMPLE')
+  AND NOT EXISTS (
+        SELECT 1 FROM dbo.WEB_AccessProfileMenu x
+        WHERE x.ProfileCode = 'SIMPLE' AND x.MenuCode = m.MenuCode
   );
 
 /* Asignar ADMIN a adminquimica si existe y no tiene perfil */

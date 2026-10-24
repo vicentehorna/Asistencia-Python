@@ -181,7 +181,10 @@ def ensure_and_enforce_web_access():
     if path.startswith('/api/'):
         return jsonify({"error": "No tiene permiso para esta opción."}), 403
 
-    flash('No tiene permiso para acceder a esa opción.', 'warning')
+    # Dashboard suele ser el landing por defecto: si no lo tiene, redirigir
+    # en silencio al primer menú permitido (evita el aviso engañoso).
+    if menu_code != 'dashboard':
+        flash('No tiene permiso para acceder a esa opción.', 'warning')
     target = first_allowed_endpoint(session)
     try:
         return redirect(url_for(target))
@@ -274,10 +277,20 @@ def load_user(user_id):
     return User.get_user_by_id(user_id)
 
 
+def _redirect_after_login():
+    """Lleva al primer menú permitido (evita flash si no tiene Dashboard)."""
+    from web_access import first_allowed_endpoint
+    target = first_allowed_endpoint(session)
+    try:
+        return redirect(url_for(target))
+    except Exception:
+        return redirect(url_for('dashboard'))
+
+
 @app.route('/')
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        return _redirect_after_login()
     return render_template('login.html')
 
 
@@ -290,7 +303,7 @@ def login_post():
         session['login_userid'] = username
         ensure_user_session()
         _load_web_access_into_session(username)
-        return redirect(url_for('dashboard'))
+        return _redirect_after_login()
     flash('Usuario o contraseña incorrectos.', 'error')
     return redirect(url_for('login'))
 
@@ -925,6 +938,145 @@ def _vacaciones_company_person_solicitud():
     return company, person
 
 
+def _es_perfil_simple_web():
+    """Perfil de acceso web SIMPLE (Portal Trabajador: solo su información)."""
+    return str(session.get('web_profilecode') or '').strip().upper() == 'SIMPLE'
+
+
+def _portal_effective_company_lock():
+    """Compañía fija si perfil SIMPLE."""
+    if not _es_perfil_simple_web():
+        return None
+    company, _ = _vacaciones_company_person_solicitud()
+    return company or None
+
+
+def _portal_effective_person_lock():
+    """Person fijo si perfil SIMPLE."""
+    if not _es_perfil_simple_web():
+        return None
+    _, person = _vacaciones_company_person_solicitud()
+    return person or None
+
+
+def _descripcion_compania_selector(codigo):
+    codigo = str(codigo or '').strip()
+    if not codigo:
+        return ''
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('EXEC sp_pr_selectorcompanias_web')
+        for r in cursor.fetchall():
+            if str(getattr(r, 'Company', r[0])).strip() == codigo:
+                desc = getattr(r, 'description', None)
+                if desc is None and len(r) > 1:
+                    desc = r[1]
+                return str(desc).strip() if desc is not None else codigo
+    except Exception:
+        logging.exception('_descripcion_compania_selector')
+        return codigo
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return codigo
+
+
+def _nombre_persona_sesion(person_code):
+    person_code = str(person_code or '').strip()
+    nombre = str(getattr(current_user, 'nombre', None) or '').strip()
+    if nombre:
+        return nombre
+    if not person_code:
+        return ''
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT TOP 1 Name FROM SY_Person WHERE Person = ?', (person_code,))
+        row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0]).strip()
+    except Exception:
+        logging.exception('_nombre_persona_sesion')
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return person_code
+
+
+def _reporte_filtros_perfil_template_context():
+    """SIMPLE fija compañía y trabajador (como Portal Minero)."""
+    ensure_user_session()
+    lock_cia = _portal_effective_company_lock()
+    lock_person = _portal_effective_person_lock()
+    person_name = _nombre_persona_sesion(lock_person) if lock_person else ''
+    return {
+        'minero_restringe_compania': bool(lock_cia),
+        'minero_compania_codigo': lock_cia or '',
+        'minero_compania_text': _descripcion_compania_selector(lock_cia) if lock_cia else '',
+        'simple_restringe_trabajador': bool(lock_person),
+        'simple_trabajador_codigo': lock_person or '',
+        'simple_trabajador_nombre': person_name or lock_person or '',
+    }
+
+
+def _fmt_periodo_yyyy_mm(val):
+    """Periodo para columnas de reporte: YYYY-MM (p. ej. 20250301 → 2025-03)."""
+    if val is None:
+        return ''
+    s = re.sub(r'\D', '', str(val).strip())
+    if len(s) >= 6:
+        return f'{s[:4]}-{s[4:6]}'
+    return str(val).strip()
+
+
+def _dicts_last_nonempty_resultset(cursor):
+    """Último result set con filas (SPs con DML previo al SELECT)."""
+    last_out = []
+    while True:
+        if cursor.description:
+            cols = [str(c[0]).strip() for c in cursor.description]
+            rows = cursor.fetchall()
+            if rows:
+                out = []
+                for row in rows:
+                    rd = {}
+                    for i, cname in enumerate(cols):
+                        key = (cname or f'col{i}').lower()
+                        rd[key] = row[i]
+                    out.append(rd)
+                last_out = out
+        if not cursor.nextset():
+            break
+    return last_out
+
+
+def _parse_fecha_reporte_saldo(raw):
+    """Fecha de corte para sp_pr_reportesaldos_total_web (por defecto hoy)."""
+    if raw is None or str(raw).strip() == '':
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    s = str(raw).strip()
+    if 'T' in s:
+        s = s.split('T')[0]
+    s = s.replace('/', '-')[:10]
+    try:
+        return datetime.strptime(s[:10], '%Y-%m-%d')
+    except ValueError:
+        try:
+            return datetime.strptime(s[:10], '%d/%m/%Y')
+        except ValueError:
+            return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+
 def _dias_totales_vacaciones_ejercicio(company):
     if not company:
         return 30
@@ -1116,6 +1268,163 @@ def api_solicitud_vacaciones_ejercicio():
         'kpi_disponibles_fmt': '%.2f' % kpi_disp,
         'historial': historial,
     })
+
+
+@app.route('/reporte-vacaciones-detalle')
+@login_required
+def reporte_vacaciones_detalle_page():
+    return render_template(
+        'reporte_vacaciones_detalle.html',
+        **_reporte_filtros_perfil_template_context(),
+    )
+
+
+@app.route('/reporte_vacaciones_detalle', methods=['POST'])
+@login_required
+def reporte_vacaciones_detalle_post():
+    """sp_pr_r019_vacationdetail_web @cia, @period, @person, @dni."""
+    ensure_user_session()
+    lock_cia = _portal_effective_company_lock()
+    lock_person = _portal_effective_person_lock()
+    body = request.get_json(silent=True) or {}
+    cia = str(body.get('cia') or '').strip()
+    if lock_cia:
+        cia = lock_cia
+    period_raw = body.get('period')
+    ps = str(period_raw).strip() if period_raw is not None else ''
+    if ps == '' or ps == '0':
+        period = '0'
+    else:
+        period = _normalize_pr_period(period_raw)
+    person = str(body.get('person') or '0').strip() or '0'
+    if lock_person:
+        person = lock_person
+    dni = str(body.get('dni') or '').strip()
+    if lock_person:
+        dni = ''
+
+    if not cia:
+        return jsonify({"error": "Seleccione una compañía."}), 400
+
+    headers_es = [
+        'Periodo', 'Código', 'Nombre', 'Fecha inicio', 'Fecha fin',
+        'Días', 'Año control', 'Cargo',
+    ]
+    keys_datos = ['person', 'name', 'datebegin', 'dateend', 'days', 'controlyear', 'cargo']
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_pr_r019_vacationdetail_web @cia=?, @period=?, @person=?, @dni=?",
+            (cia, period, person, dni),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        resultado = []
+        for r in rows:
+            fila = [_fmt_periodo_yyyy_mm(r.get('prperiod'))]
+            for key in keys_datos:
+                val = r.get(key)
+                if key == 'days' and val is not None:
+                    try:
+                        fila.append(int(round(float(val))))
+                    except Exception:
+                        fila.append(_jsonable_value(val))
+                else:
+                    fila.append(_jsonable_value(val))
+            resultado.append(fila)
+        return jsonify({"headers": headers_es, "data": resultado})
+    except Exception as e:
+        logging.exception("reporte_vacaciones_detalle_post")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/reporte-saldo-vacaciones')
+@login_required
+def reporte_saldo_vacaciones_page():
+    return render_template(
+        'reporte_saldo_vacaciones.html',
+        **_reporte_filtros_perfil_template_context(),
+    )
+
+
+@app.route('/reporte_saldo_vacaciones', methods=['POST'])
+@login_required
+def reporte_saldo_vacaciones_post():
+    """sp_pr_reportesaldos_total_web @company, @person, @date, @cesados, @dni."""
+    ensure_user_session()
+    lock_cia = _portal_effective_company_lock()
+    lock_person = _portal_effective_person_lock()
+    body = request.get_json(silent=True) or {}
+    cia = str(body.get('cia') or '').strip()
+    if lock_cia:
+        cia = lock_cia
+    person = str(body.get('person') or '0').strip() or '0'
+    if lock_person:
+        person = lock_person
+    dni = str(body.get('dni') or '').strip()
+    if lock_person:
+        dni = ''
+    fecha_corte = _parse_fecha_reporte_saldo(body.get('date') or body.get('fecha'))
+    cesados_raw = str(body.get('cesados') or body.get('cesados_saldo') or 'T').strip().upper()
+    cesados = cesados_raw if cesados_raw in ('T', 'Y', 'N') else 'T'
+
+    if not cia:
+        return jsonify({"error": "Seleccione una compañía."}), 400
+
+    headers_es = [
+        'Código', 'Nombre', 'Fecha ingreso', 'Fecha cese', 'Año control',
+        'Fecha inicio', 'Fecha fin', 'Tomados', 'Pendientes', 'Vencidos', 'Truncos',
+    ]
+    keys_datos = [
+        'codigo', 'nombre', 'fechaingreso', 'fechacese', 'controlyear',
+        'fechainicio', 'fechafin', 'tomados', 'pendientes', 'vencidos', 'truncos',
+    ]
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_pr_reportesaldos_total_web @company=?, @person=?, @date=?, @cesados=?, @dni=?",
+            (cia, person, fecha_corte, cesados, dni),
+        )
+        rows = _dicts_last_nonempty_resultset(cursor)
+        resultado = []
+        for r in rows:
+            fila = []
+            for key in keys_datos:
+                val = r.get(key)
+                if key == 'tomados' and val is not None:
+                    try:
+                        fila.append(int(round(float(val))))
+                    except Exception:
+                        fila.append(_jsonable_value(val))
+                elif key in ('pendientes', 'vencidos') and val is not None:
+                    try:
+                        fila.append(float(val))
+                    except Exception:
+                        fila.append(_jsonable_value(val))
+                else:
+                    fila.append(_jsonable_value(val))
+            resultado.append(fila)
+        return jsonify({"headers": headers_es, "data": resultado})
+    except Exception as e:
+        logging.exception("reporte_saldo_vacaciones_post")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.route('/perfiles-acceso')
@@ -1715,6 +2024,8 @@ def reporte_planilla_vertical_page():
 @login_required
 def api_companias():
     """sp_pr_selectorcompanias_web → Company, description (@cia para el resto)."""
+    ensure_user_session()
+    lock = _portal_effective_company_lock()
     conn = None
     try:
         conn = get_db_connection()
@@ -1722,6 +2033,10 @@ def api_companias():
         cursor.execute("EXEC sp_pr_selectorcompanias_web")
         rows = cursor.fetchall()
         data = [{"id": r.Company, "text": r.description} for r in rows]
+        if lock:
+            data = [d for d in data if str(d.get('id') or '').strip() == lock]
+            if not data:
+                data = [{"id": lock, "text": _descripcion_compania_selector(lock) or lock}]
         return jsonify(data)
     except Exception:
         logging.exception("api_companias")
@@ -1825,7 +2140,17 @@ def api_periodos():
 @login_required
 def api_trabajadores():
     """sp_pr_selectorpersonas_web @cia → Person, Name"""
+    ensure_user_session()
+    lock_cia = _portal_effective_company_lock()
+    lock_person = _portal_effective_person_lock()
     cia = request.args.get('cia')
+    if lock_cia and (not cia or str(cia).strip() != lock_cia):
+        return jsonify([])
+    if lock_person:
+        return jsonify([{
+            "id": lock_person,
+            "text": _nombre_persona_sesion(lock_person) or lock_person,
+        }])
     if not cia:
         return jsonify([])
     conn = None
@@ -1838,6 +2163,51 @@ def api_trabajadores():
         return jsonify(data)
     except Exception:
         logging.exception("api_trabajadores")
+        return jsonify([])
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/selectores/periodos-asig')
+@login_required
+def api_periodos_asig():
+    """sp_pr_selectorperiodos_asig_web @cia → PRPERIOD (id), description (text)."""
+    ensure_user_session()
+    lock = _portal_effective_company_lock()
+    cia = request.args.get('cia')
+    if lock and (not cia or str(cia).strip() != lock):
+        return jsonify([])
+    if not cia:
+        return jsonify([])
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_pr_selectorperiodos_asig_web @cia=?",
+            (cia,),
+        )
+        desc = cursor.description
+        rows = cursor.fetchall()
+        if not rows or not desc:
+            return jsonify([])
+        cols = [str(c[0] or '').strip().lower() for c in desc]
+        data = []
+        for row in rows:
+            rd = {cols[i]: row[i] for i in range(len(cols))}
+            pid = rd.get('prperiod')
+            txt = rd.get('description')
+            pid_s = str(pid).strip() if pid is not None else ''
+            txt_s = str(txt).strip() if txt is not None else pid_s
+            if pid_s:
+                data.append({"id": pid_s, "text": txt_s})
+        return jsonify(data)
+    except Exception:
+        logging.exception("api_periodos_asig")
         return jsonify([])
     finally:
         if conn:
