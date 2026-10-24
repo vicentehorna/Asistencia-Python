@@ -1603,6 +1603,7 @@ def reporte_aprobar_vacaciones_post():
                     menus=actor['menus'],
                     unrestricted=actor['unrestricted'],
                     web_admin=actor['web_admin'],
+                    approval_userid=str(getattr(current_user, 'id', '') or ''),
                 )
                 resumen = accion.get('resumen') or {}
                 flujo_detalle = resumen.get('detalle') or flujo_detalle

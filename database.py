@@ -3611,19 +3611,40 @@ def resumir_estado_flujo_vacaciones(pasos, status_solicitud=None):
     }
 
 
-def usuario_puede_actuar_paso_vacaciones(paso, person_actor, profilecode, menus=None, unrestricted=False, web_admin=False):
-    """True si el usuario actual puede aprobar/rechazar el paso pendiente."""
+def usuario_puede_actuar_paso_vacaciones(paso, person_actor, profilecode, menus=None, unrestricted=False, web_admin=False,
+                                         pasos_solicitud=None, approval_userid=None):
+    """
+    True si el usuario actual puede aprobar/rechazar el paso pendiente.
+    - JEFE_CC: solo el Person del boss del centro de costo.
+    - ROL_PERFIL: solo si el perfil web coincide (p.ej. APROBADOR). Sin bypass admin/unrestricted.
+    - Segregación: quien ya firmó un nivel de la misma solicitud no puede firmar otro.
+    """
     if not paso or str(paso.get('Estado') or '').upper() != 'P':
         return False
     tipo = str(paso.get('TipoAprobador') or '').upper()
     per = str(person_actor or '').strip()
+    uid = str(approval_userid or '').strip().upper()
+
+    # Un mismo usuario no aprueba dos niveles de la misma solicitud.
+    for prev in pasos_solicitud or []:
+        if str(prev.get('Estado') or '').upper() != 'A':
+            continue
+        prev_uid = str(prev.get('UserID') or '').strip().upper()
+        if uid and prev_uid and uid == prev_uid:
+            return False
+        # Si firmó como jefe (Person), tampoco cierra RRHH con otro perfil.
+        if (
+            tipo == 'ROL_PERFIL'
+            and per
+            and str(prev.get('TipoAprobador') or '').upper() == 'JEFE_CC'
+            and per == str(prev.get('AprobadorPerson') or '').strip()
+        ):
+            return False
+
     if tipo == 'JEFE_CC':
         return bool(per) and per == str(paso.get('AprobadorPerson') or '').strip()
     if tipo == 'ROL_PERFIL':
-        # Acceso a la bandeja = menú; firma RRHH = perfil (p.ej. APROBADOR).
-        # Así un jefe con menú "aprobar_vacaciones" no cierra el nivel RRHH.
-        if unrestricted or web_admin:
-            return True
+        # Firma RRHH = perfil exacto (APROBADOR). El menú solo abre la bandeja.
         perfil_req = str(paso.get('ProfileCode') or 'APROBADOR').strip().upper()
         perfil_user = str(profilecode or '').strip().upper()
         return bool(perfil_user) and perfil_user == perfil_req
@@ -3631,7 +3652,8 @@ def usuario_puede_actuar_paso_vacaciones(paso, person_actor, profilecode, menus=
 
 
 def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_actor, profilecode,
-                                     menus=None, unrestricted=False, web_admin=False):
+                                     menus=None, unrestricted=False, web_admin=False,
+                                     approval_userid=None):
     """
     Devuelve dict con paso pendiente y flags can_approve / can_reject / requires_sustento.
     """
@@ -3642,6 +3664,7 @@ def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_act
     can = usuario_puede_actuar_paso_vacaciones(
         pend, person_actor, profilecode, menus=menus,
         unrestricted=unrestricted, web_admin=web_admin,
+        pasos_solicitud=pasos, approval_userid=approval_userid,
     ) if pend else False
     es_final = bool(pend) and int(pend.get('Nivel') or 0) == len(pasos)
     es_rrhh = bool(pend) and str(pend.get('TipoAprobador') or '').upper() == 'ROL_PERFIL'
@@ -3783,9 +3806,11 @@ def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_a
     """
     conn = None
     try:
+        user = str(approval_user or '').strip()[:20]
         info = resolver_accion_flujo_vacaciones(
             company, person, line, person_actor, profilecode,
             menus=menus, unrestricted=unrestricted, web_admin=web_admin,
+            approval_userid=user,
         )
         if not info.get('can_approve'):
             return False, 'No tiene pendiente de aprobación en esta solicitud.', info
@@ -3796,7 +3821,6 @@ def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_a
         cia = str(company or '').strip()
         per = str(person or '').strip()
         line_i = int(line)
-        user = str(approval_user or '').strip()[:20]
 
         if not _wf_marcar_paso(cursor, cia, per, line_i, pend['Nivel'], 'A', user, observacion):
             conn.rollback()
@@ -3885,9 +3909,11 @@ def rechazar_paso_flujo_vacaciones(company, person, line, approval_user, person_
         return False, 'El motivo de rechazo es obligatorio.', {}
     conn = None
     try:
+        user = str(approval_user or '').strip()[:20]
         info = resolver_accion_flujo_vacaciones(
             company, person, line, person_actor, profilecode,
             menus=menus, unrestricted=unrestricted, web_admin=web_admin,
+            approval_userid=user,
         )
         if not info.get('can_reject'):
             return False, 'No tiene pendiente de rechazo en esta solicitud.', info
@@ -3898,7 +3924,6 @@ def rechazar_paso_flujo_vacaciones(company, person, line, approval_user, person_
         cia = str(company or '').strip()
         per = str(person or '').strip()
         line_i = int(line)
-        user = str(approval_user or '').strip()[:20]
 
         if not _wf_marcar_paso(cursor, cia, per, line_i, pend['Nivel'], 'R', user, motivo):
             conn.rollback()
