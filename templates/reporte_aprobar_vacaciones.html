@@ -196,6 +196,40 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="modalRechazarVacaciones" tabindex="-1" aria-labelledby="modalRechazarVacacionesLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="frmRechazarVacaciones" novalidate>
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold text-secondary" id="modalRechazarVacacionesLabel">
+                        <i class="bi bi-x-circle me-2 text-danger"></i>Rechazar solicitud
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-3" id="modalRechazoResumen">—</p>
+                    <input type="hidden" id="rechazoSolicitudId" value="">
+                    <input type="hidden" id="rechazoPersonDni" value="">
+                    <div class="mb-3">
+                        <label for="rechazoObservacion" class="form-label small fw-bold text-muted">
+                            Motivo del rechazo <span class="text-danger">*</span>
+                        </label>
+                        <textarea class="form-control form-control-sm" id="rechazoObservacion" rows="3"
+                                  maxlength="500" required placeholder="Indique el motivo (obligatorio)"></textarea>
+                    </div>
+                    <div id="rechazoError" class="alert alert-danger py-2 small d-none" role="alert"></div>
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-danger btn-sm" id="btnConfirmarRechazo">
+                        <i class="bi bi-x-lg me-1"></i>Rechazar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -229,11 +263,14 @@ document.addEventListener('DOMContentLoaded', async function () {
     const IDX_STICKY_2 = 1;
     const IDX_CENTRO = new Set([2, 3, 4, 5, 6]);
     const URL_APROBAR_SUSTENTO = {{ url_for('aprobar_vacaciones_con_sustento') | tojson }};
+    const URL_APROBAR_NIVEL = {{ url_for('aprobar_vacaciones_nivel') | tojson }};
+    const URL_RECHAZAR_NIVEL = {{ url_for('rechazar_vacaciones_nivel') | tojson }};
     const URL_DESCARGAR_SUSTENTO = {{ url_for('descargar_sustento_vacaciones') | tojson }};
 
     let lastExportAprobarVac = null;
     let lastRowsMetaAprobarVac = [];
     let modalSustentoInst = null;
+    let modalRechazoInst = null;
 
     function escapeHtml(s) {
         return String(s || '')
@@ -277,17 +314,34 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (!meta) return '<span class="text-muted">—</span>';
         const iconStyle = 'color:#06b6d4;';
         const parts = [];
-        if (meta.can_upload) {
-            const id = escapeHtml(meta.id);
-            const person = escapeHtml(meta.person);
-            const year = escapeHtml(meta.controlyear);
-            const nombre = escapeHtml(meta.name || '');
+        const id = escapeHtml(meta.id);
+        const person = escapeHtml(meta.person);
+        const year = escapeHtml(meta.controlyear);
+        const nombre = escapeHtml(meta.name || '');
+        if (meta.can_approve) {
             parts.push(
-                '<span role="button" tabindex="0" class="btn-adjuntar-sustento me-2" ' +
+                '<button type="button" class="btn btn-success btn-sm py-0 px-2 btn-aprobar-nivel" ' +
+                'data-solicitud-id="' + id + '" data-person-dni="' + person + '" ' +
+                'title="Aprobar nivel pendiente" aria-label="Aprobar nivel">' +
+                '<i class="bi bi-check2"></i> Aprobar</button>'
+            );
+        }
+        if (meta.can_upload) {
+            parts.push(
+                '<span role="button" tabindex="0" class="btn-adjuntar-sustento me-1" ' +
                 'data-solicitud-id="' + id + '" data-person-dni="' + person + '" ' +
                 'data-control-year="' + year + '" data-person-name="' + nombre + '" ' +
-                'title="Adjuntar sustento PDF y aprobar" aria-label="Adjuntar sustento y aprobar">' +
+                'title="Adjuntar sustento PDF y aprobar (nivel final)" aria-label="Adjuntar sustento y aprobar">' +
                 '<i class="bi bi-cloud-upload fs-5" style="cursor:pointer; ' + iconStyle + '"></i></span>'
+            );
+        }
+        if (meta.can_reject) {
+            parts.push(
+                '<button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 btn-rechazar-nivel" ' +
+                'data-solicitud-id="' + id + '" data-person-dni="' + person + '" ' +
+                'data-person-name="' + nombre + '" ' +
+                'title="Rechazar solicitud" aria-label="Rechazar">' +
+                '<i class="bi bi-x-lg"></i></button>'
             );
         }
         if (meta.can_download) {
@@ -302,7 +356,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             );
         }
         if (!parts.length) return '<span class="text-muted">—</span>';
-        return '<span class="d-inline-flex align-items-center justify-content-center gap-1">' +
+        return '<span class="d-inline-flex align-items-center justify-content-center gap-1 flex-wrap">' +
             parts.join('') + '</span>';
     }
 
@@ -380,6 +434,60 @@ document.addEventListener('DOMContentLoaded', async function () {
                 });
             });
         });
+        tbody.querySelectorAll('.btn-aprobar-nivel').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                if (!confirm('¿Confirma aprobar el nivel pendiente de esta solicitud?')) return;
+                btn.disabled = true;
+                try {
+                    const res = await fetch(URL_APROBAR_NIVEL, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            solicitud_id: btn.getAttribute('data-solicitud-id'),
+                            person: btn.getAttribute('data-person-dni'),
+                        }),
+                    });
+                    const data = await res.json().catch(function () { return {}; });
+                    if (!res.ok) {
+                        alert((data && data.error) || 'No se pudo aprobar el nivel.');
+                        return;
+                    }
+                    alert((data && data.message) || 'Nivel aprobado.');
+                    document.getElementById('btnBuscarAprobarVac').click();
+                } catch (err) {
+                    console.error(err);
+                    alert('Error de red al aprobar.');
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+        });
+        tbody.querySelectorAll('.btn-rechazar-nivel').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                abrirModalRechazo({
+                    id: btn.getAttribute('data-solicitud-id'),
+                    person: btn.getAttribute('data-person-dni'),
+                    name: btn.getAttribute('data-person-name'),
+                });
+            });
+        });
+    }
+
+    function abrirModalRechazo(meta) {
+        if (!meta || !modalRechazoInst) return;
+        document.getElementById('rechazoSolicitudId').value = String(meta.id || '');
+        document.getElementById('rechazoPersonDni').value = String(meta.person || '');
+        document.getElementById('rechazoObservacion').value = '';
+        const errEl = document.getElementById('rechazoError');
+        errEl.classList.add('d-none');
+        errEl.textContent = '';
+        const resumen = [
+            meta.person ? 'Código: ' + meta.person : '',
+            meta.name ? 'Nombre: ' + meta.name : '',
+        ].filter(Boolean).join(' · ');
+        document.getElementById('modalRechazoResumen').textContent = resumen || 'Solicitud #' + meta.id;
+        modalRechazoInst.show();
     }
 
     function filenameFromContentDisposition(header) {
@@ -645,6 +753,53 @@ document.addEventListener('DOMContentLoaded', async function () {
     const modalEl = document.getElementById('modalAdjuntarSustento');
     if (modalEl && window.bootstrap) {
         modalSustentoInst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    }
+    const modalRechazoEl = document.getElementById('modalRechazarVacaciones');
+    if (modalRechazoEl && window.bootstrap) {
+        modalRechazoInst = bootstrap.Modal.getOrCreateInstance(modalRechazoEl);
+    }
+
+    const frmRechazo = document.getElementById('frmRechazarVacaciones');
+    if (frmRechazo) {
+        frmRechazo.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const errEl = document.getElementById('rechazoError');
+            const btn = document.getElementById('btnConfirmarRechazo');
+            const motivo = String(document.getElementById('rechazoObservacion').value || '').trim();
+            errEl.classList.add('d-none');
+            if (!motivo) {
+                errEl.textContent = 'El motivo de rechazo es obligatorio.';
+                errEl.classList.remove('d-none');
+                return;
+            }
+            btn.disabled = true;
+            try {
+                const res = await fetch(URL_RECHAZAR_NIVEL, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        solicitud_id: document.getElementById('rechazoSolicitudId').value,
+                        person: document.getElementById('rechazoPersonDni').value,
+                        observacion: motivo,
+                    }),
+                });
+                const data = await res.json().catch(function () { return {}; });
+                if (!res.ok || data.error) {
+                    errEl.textContent = (data && data.error) || 'No se pudo rechazar.';
+                    errEl.classList.remove('d-none');
+                    return;
+                }
+                if (modalRechazoInst) modalRechazoInst.hide();
+                document.getElementById('btnBuscarAprobarVac').click();
+            } catch (err) {
+                console.error(err);
+                errEl.textContent = 'Error de red al rechazar.';
+                errEl.classList.remove('d-none');
+            } finally {
+                btn.disabled = false;
+            }
+        });
     }
 
     const frmSustento = document.getElementById('frmAdjuntarSustento');

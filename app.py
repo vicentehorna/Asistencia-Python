@@ -60,6 +60,10 @@ from database import (
     obtener_sustento_drive_ids_por_solicitudes,
     obtener_drive_file_id_sustento_vacaciones,
     aprobar_solicitud_vacaciones_con_sustento,
+    resolver_accion_flujo_vacaciones,
+    aprobar_paso_flujo_vacaciones,
+    rechazar_paso_flujo_vacaciones,
+    resumir_estado_flujo_vacaciones,
 )
 from google_drive import (
     carpeta_sustento_vacaciones_desde_env,
@@ -1060,8 +1064,11 @@ def _reporte_aprobar_vacaciones_template_context():
     }
 
 
-def _status_vacaciones_reporte_text(status_code):
+def _status_vacaciones_reporte_text(status_code, flujo_detalle=None):
     code = str(status_code or '').strip().upper()
+    detalle = str(flujo_detalle or '').strip()
+    if detalle and code == 'P':
+        return detalle
     if code == 'A':
         return 'Aprobado'
     if code == 'R':
@@ -1143,15 +1150,42 @@ def _historial_solicitud_vacaciones_items(rows, format_dates=False):
         status_code = str(r.get('status') or '').strip().upper() or 'P'
         date_begin = r.get('DateBegin')
         date_end = r.get('DateEnd')
+        flujo = r.get('flujo') or resumir_estado_flujo_vacaciones(
+            r.get('pasos_flujo') or [], status_code
+        )
+        # Solo eliminar si sigue pendiente y nadie aprobó un nivel
+        pasos = r.get('pasos_flujo') or []
+        alguien_aprobo = any(str(p.get('Estado') or '').upper() == 'A' for p in pasos)
         historial.append({
             'id': r.get('Id'),
             'date_begin': fecha_filter(date_begin) if format_dates else date_begin,
             'date_end': fecha_filter(date_end) if format_dates else date_end,
             'days': int(r.get('Days') or 0),
-            'can_delete': status_code == 'P',
+            'can_delete': status_code == 'P' and not alguien_aprobo,
             'control_year': str(r.get('ControlYear') or '').strip(),
+            'status': status_code,
+            'flujo_codigo': flujo.get('codigo'),
+            'flujo_label': flujo.get('label') or '',
+            'flujo_chip': flujo.get('chip') or 'secondary',
+            'flujo_detalle': flujo.get('detalle') or '',
         })
     return historial
+
+
+def _actor_flujo_vacaciones_ctx():
+    """Person / perfil / menús del usuario logueado para resolver bandeja."""
+    person = str(session.get('person') or '').strip()
+    profilecode = str(session.get('web_profilecode') or '').strip() or None
+    menus = list(session.get('web_menus') or [])
+    unrestricted = bool(session.get('web_access_unrestricted'))
+    web_admin = bool(session.get('web_admin'))
+    return {
+        'person_actor': person,
+        'profilecode': profilecode,
+        'menus': menus,
+        'unrestricted': unrestricted,
+        'web_admin': web_admin,
+    }
 
 
 def _days_between_calendar(fecha_inicio_str, fecha_fin_str):
@@ -1497,12 +1531,13 @@ def reporte_aprobar_vacaciones_post():
 
     headers_es = [
         'Código', 'Nombre', 'Ejercicio', 'Fecha inicio', 'Fecha fin',
-        'Estado', 'Fecha aprobación',
+        'Estado / Flujo', 'Fecha aprobación',
     ]
     keys_datos = [
         'person', 'name', 'controlyear', 'datebegin', 'dateend',
         'status', 'approvaldate',
     ]
+    actor = _actor_flujo_vacaciones_ctx()
 
     conn = None
     try:
@@ -1529,31 +1564,54 @@ def reporte_aprobar_vacaciones_post():
         rows_meta = []
         for r in rows:
             status_code = str(r.get('status') or '').strip().upper() or 'P'
-            fila = []
-            for key in keys_datos:
-                val = r.get(key)
-                if key == 'status':
-                    fila.append(_status_vacaciones_reporte_text(val))
-                elif key in ('datebegin', 'dateend', 'approvaldate'):
-                    fila.append(fecha_filter(val))
-                else:
-                    fila.append(_jsonable_value(val))
-            resultado.append(fila)
             sid = r.get('id')
             try:
                 sid_int = int(sid) if sid is not None else None
             except (TypeError, ValueError):
                 sid_int = None
             person_row = str(r.get('person') or '').strip()
+            flujo_detalle = str(r.get('descripcion_nivel') or r.get('estado_flujo') or '').strip()
+            accion = {}
+            if sid_int is not None and person_row and status_code == 'P':
+                accion = resolver_accion_flujo_vacaciones(
+                    cia, person_row, sid_int,
+                    actor['person_actor'], actor['profilecode'],
+                    menus=actor['menus'],
+                    unrestricted=actor['unrestricted'],
+                    web_admin=actor['web_admin'],
+                )
+                resumen = accion.get('resumen') or {}
+                flujo_detalle = resumen.get('detalle') or flujo_detalle
+            elif status_code == 'A':
+                flujo_detalle = 'Aprobado'
+            elif status_code == 'R':
+                flujo_detalle = 'Rechazado'
+
+            fila = []
+            for key in keys_datos:
+                val = r.get(key)
+                if key == 'status':
+                    fila.append(_status_vacaciones_reporte_text(val, flujo_detalle))
+                elif key in ('datebegin', 'dateend', 'approvaldate'):
+                    fila.append(fecha_filter(val))
+                else:
+                    fila.append(_jsonable_value(val))
+            resultado.append(fila)
             clave = _clave_solicitud_vacaciones(person_row, sid_int) if sid_int is not None else ''
             tiene_sustento = bool(clave and mapa_sustento.get(clave))
+            can_approve = bool(accion.get('can_approve'))
             rows_meta.append({
                 'id': _jsonable_value(sid),
                 'person': person_row,
                 'name': str(r.get('name') or '').strip(),
                 'controlyear': str(r.get('controlyear') or '').strip(),
                 'status': status_code,
-                'can_upload': status_code == 'P',
+                'flujo_detalle': flujo_detalle,
+                'nivel_actual': _jsonable_value((accion.get('resumen') or {}).get('nivel_actual')),
+                'total_niveles': _jsonable_value((accion.get('resumen') or {}).get('total_niveles')),
+                'can_upload': bool(accion.get('can_upload_sustento')),
+                'can_approve': can_approve,
+                'can_reject': bool(accion.get('can_reject')),
                 'can_download': tiene_sustento,
             })
         headers_es.append('Acciones')
@@ -1654,16 +1712,22 @@ def aprobar_vacaciones_con_sustento():
         file_id = subir_pdf_sustento_drive(
             folder_id, nombre_drive, archivo.stream, app_root=app.root_path
         )
+        actor = _actor_flujo_vacaciones_ctx()
         ok = aprobar_solicitud_vacaciones_con_sustento(
             solicitud_id=solicitud_id,
             company=company,
             approval_user=current_user.id,
             drive_file_id=file_id,
             person=person_dni,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
         )
         if not ok:
             return jsonify({
-                'error': 'No se pudo aprobar la solicitud (ya fue procesada o no existe).',
+                'error': 'No se pudo aprobar la solicitud (ya fue procesada, no le corresponde el nivel o no existe).',
             }), 409
         return jsonify({
             'ok': True,
@@ -1676,6 +1740,83 @@ def aprobar_vacaciones_con_sustento():
     except Exception as e:
         logging.exception('aprobar_vacaciones_con_sustento')
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/aprobar-vacaciones-nivel', methods=['POST'])
+@login_required
+def aprobar_vacaciones_nivel():
+    """Aprueba el nivel pendiente del actor (jefe CC) sin sustento PDF."""
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    company = _reporte_compania_usuario_logueado()
+    solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
+    person_dni = str(
+        body.get('person') or body.get('person_dni')
+        or request.form.get('person') or request.form.get('person_dni') or ''
+    ).strip()
+    observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
+    if not company:
+        return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+    if not solicitud_id or not person_dni:
+        return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+    actor = _actor_flujo_vacaciones_ctx()
+    ok, msg, info = aprobar_paso_flujo_vacaciones(
+        company=company,
+        person=person_dni,
+        line=int(solicitud_id),
+        approval_user=current_user.id,
+        person_actor=actor['person_actor'],
+        profilecode=actor['profilecode'],
+        menus=actor['menus'],
+        unrestricted=actor['unrestricted'],
+        web_admin=actor['web_admin'],
+        observacion=observacion or None,
+    )
+    if not ok:
+        return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
+    resumen = (info or {}).get('resumen') or {}
+    return jsonify({
+        'ok': True,
+        'message': msg,
+        'flujo': resumen,
+    })
+
+
+@app.route('/rechazar-vacaciones-nivel', methods=['POST'])
+@login_required
+def rechazar_vacaciones_nivel():
+    """Rechaza el nivel pendiente; motivo obligatorio."""
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    company = _reporte_compania_usuario_logueado()
+    solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
+    person_dni = str(
+        body.get('person') or body.get('person_dni')
+        or request.form.get('person') or request.form.get('person_dni') or ''
+    ).strip()
+    observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
+    if not company:
+        return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+    if not solicitud_id or not person_dni:
+        return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+    if not observacion:
+        return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
+    actor = _actor_flujo_vacaciones_ctx()
+    ok, msg, info = rechazar_paso_flujo_vacaciones(
+        company=company,
+        person=person_dni,
+        line=int(solicitud_id),
+        approval_user=current_user.id,
+        person_actor=actor['person_actor'],
+        profilecode=actor['profilecode'],
+        menus=actor['menus'],
+        unrestricted=actor['unrestricted'],
+        web_admin=actor['web_admin'],
+        observacion=observacion,
+    )
+    if not ok:
+        return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
+    return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
 
 
 @app.route('/perfiles-acceso')

@@ -33,6 +33,8 @@ ENDPOINT_MENU_MAP = {
     'reporte_aprobar_vacaciones_page': 'aprobar_vacaciones',
     'reporte_aprobar_vacaciones_post': 'aprobar_vacaciones',
     'aprobar_vacaciones_con_sustento': 'aprobar_vacaciones',
+    'aprobar_vacaciones_nivel': 'aprobar_vacaciones',
+    'rechazar_vacaciones_nivel': 'aprobar_vacaciones',
     'descargar_sustento_vacaciones': 'aprobar_vacaciones',
 }
 
@@ -72,6 +74,8 @@ PATH_PREFIX_MENU_MAP = {
     '/reporte-aprobar-vacaciones': 'aprobar_vacaciones',
     '/reporte_aprobar_vacaciones': 'aprobar_vacaciones',
     '/aprobar-vacaciones-con-sustento': 'aprobar_vacaciones',
+    '/aprobar-vacaciones-nivel': 'aprobar_vacaciones',
+    '/rechazar-vacaciones-nivel': 'aprobar_vacaciones',
     '/sustento-vacaciones': 'aprobar_vacaciones',
 }
 

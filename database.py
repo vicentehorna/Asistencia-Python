@@ -2714,7 +2714,7 @@ def get_max_dias_vacaciones(company):
 
 
 def get_historial_solicitud_vacaciones(company, person, control_year=None):
-    """Lista solicitudes de vacaciones del trabajador."""
+    """Lista solicitudes de vacaciones del trabajador (incluye resumen de flujo)."""
     conn = None
     try:
         conn = DatabaseConfig.get_connection()
@@ -2738,6 +2738,20 @@ def get_historial_solicitud_vacaciones(company, person, control_year=None):
         results = [dict(zip(cols, row)) for row in cursor.fetchall()]
         cursor.close()
         conn.close()
+        for r in results:
+            try:
+                sid = int(r.get('Id'))
+            except (TypeError, ValueError):
+                continue
+            if str(r.get('status') or '').upper() == 'P':
+                asegurar_pasos_flujo_solicitud_vacaciones(
+                    r.get('Company') or company, r.get('Person') or person, sid
+                )
+            pasos = get_pasos_flujo_solicitud_vacaciones(
+                r.get('Company') or company, r.get('Person') or person, sid
+            )
+            r['flujo'] = resumir_estado_flujo_vacaciones(pasos, r.get('status'))
+            r['pasos_flujo'] = pasos
         return results
     except Exception as e:
         print(f"Error en get_historial_solicitud_vacaciones: {e}")
@@ -2845,6 +2859,7 @@ def registrar_solicitud_vacaciones(company, person, date_begin, date_end, days, 
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
         pk = _solicitud_vacaciones_pk_column(cursor)
+        new_id = None
         if pk == 'Line':
             cursor.execute(
                 """
@@ -2870,6 +2885,7 @@ def registrar_solicitud_vacaciones(company, person, date_begin, date_end, days, 
                     str(control_year or '').strip()[:4],
                 ),
             )
+            new_id = next_line
         else:
             cursor.execute(
                 """
@@ -2886,6 +2902,11 @@ def registrar_solicitud_vacaciones(company, person, date_begin, date_end, days, 
                     str(control_year or '').strip()[:4],
                 ),
             )
+            cursor.execute("SELECT CAST(SCOPE_IDENTITY() AS INT)")
+            row_id = cursor.fetchone()
+            new_id = int(row_id[0]) if row_id and row_id[0] is not None else None
+        if new_id is not None:
+            crear_pasos_flujo_solicitud_vacaciones(cia, per, new_id, cursor=cursor)
         conn.commit()
         cursor.close()
         conn.close()
@@ -2907,13 +2928,33 @@ def registrar_solicitud_vacaciones(company, person, date_begin, date_end, days, 
 
 
 def eliminar_solicitud_vacaciones(company, person, solicitud_id):
-    """Elimina solicitud pendiente (solo status P)."""
+    """Elimina solicitud pendiente (solo status P) y sus pasos de flujo."""
     conn = None
     try:
         sid = int(solicitud_id)
+        cia = str(company or '').strip()
+        per = str(person or '').strip()
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
         pk = _solicitud_vacaciones_pk_column(cursor)
+        # Solo si ningún nivel aprobó aún
+        if _wf_tablas_listas(cursor):
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
+                WHERE Company = ? AND Person = ? AND Line = ? AND Estado = 'A'
+                """,
+                (cia, per, sid),
+            )
+            if int((cursor.fetchone() or [0])[0] or 0) > 0:
+                return False
+            cursor.execute(
+                """
+                DELETE FROM dbo.WF_SolicitudPaso
+                WHERE Company = ? AND Person = ? AND Line = ?
+                """,
+                (cia, per, sid),
+            )
         cursor.execute(
             f"""
             DELETE FROM PR_SolicitudVacaciones
@@ -2922,7 +2963,7 @@ def eliminar_solicitud_vacaciones(company, person, solicitud_id):
               AND Person = ?
               AND status = 'P'
             """,
-            (sid, str(company or '').strip(), str(person or '').strip()),
+            (sid, cia, per),
         )
         deleted = cursor.rowcount > 0
         conn.commit()
@@ -3129,21 +3170,50 @@ def obtener_drive_file_id_sustento_vacaciones(solicitud_id, company, person=None
     return str(m.get(sid) or '').strip()
 
 
-def aprobar_solicitud_vacaciones_con_sustento(solicitud_id, company, approval_user, drive_file_id, person=None):
+def aprobar_solicitud_vacaciones_con_sustento(solicitud_id, company, approval_user, drive_file_id, person=None,
+                                              person_actor=None, profilecode=None, menus=None,
+                                              unrestricted=False, web_admin=False):
     """
-    Aprueba solicitud pendiente y registra el file_id de Drive en Comments (SUSTENTO_DRIVE:...).
-    Retorna True si actualizó una fila. En esquema Line requiere person.
+    Aprueba el paso pendiente (normalmente RRHH final) con sustento Drive.
+    Si no hay tablas WF, cae al UPDATE directo legacy.
     """
+    sid = int(solicitud_id)
+    drive_id = str(drive_file_id or '').strip()
+    if not drive_id:
+        return False
+    cia = str(company or '').strip()
+    per = str(person or '').strip()
+    user = str(approval_user or '').strip()[:20]
+    actor = str(person_actor or per or '').strip()
+
+    # Camino con flujo multinivel
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        has_wf = _wf_tablas_listas(cursor)
+        cursor.close()
+        conn.close()
+    except Exception:
+        has_wf = False
+
+    if has_wf and per:
+        ok, _msg, _info = aprobar_paso_flujo_vacaciones(
+            company=cia,
+            person=per,
+            line=sid,
+            approval_user=user,
+            person_actor=actor,
+            profilecode=profilecode,
+            menus=menus,
+            unrestricted=unrestricted,
+            web_admin=web_admin,
+            drive_file_id=drive_id,
+        )
+        return ok
+
     conn = None
     try:
-        sid = int(solicitud_id)
-        drive_id = str(drive_file_id or '').strip()
-        if not drive_id:
-            return False
         comments = f'SUSTENTO_DRIVE:{drive_id}'
-        user = str(approval_user or '').strip()[:20]
-        cia = str(company or '').strip()
-        per = str(person or '').strip()
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
         pk = _solicitud_vacaciones_pk_column(cursor)
@@ -3195,6 +3265,643 @@ def aprobar_solicitud_vacaciones_con_sustento(solicitud_id, company, approval_us
             except Exception:
                 pass
         return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+# --- Flujo multinivel vacaciones (AC_CostCenter.boss + ParentLevel*) ---
+
+def _wf_tablas_listas(cursor):
+    cursor.execute("SELECT OBJECT_ID('dbo.WF_SolicitudPaso', 'U'), OBJECT_ID('dbo.WF_FlujoConfig', 'U')")
+    row = cursor.fetchone() or (None, None)
+    return bool(row[0]) and bool(row[1])
+
+
+def _wf_leer_config(cursor, company, tipo='VACACIONES'):
+    cia = str(company or '').strip()
+    tipo_s = str(tipo or 'VACACIONES').strip()
+    default = [
+        {'Orden': 1, 'TipoAprobador': 'JEFE_CC_CADENA', 'ProfileCode': None,
+         'Descripcion': 'Jefe(s) por Centro de Costo / Organigrama'},
+        {'Orden': 2, 'TipoAprobador': 'ROL_PERFIL', 'ProfileCode': 'APROBADOR',
+         'Descripcion': 'Gestión de RR.HH. / Personal'},
+    ]
+    cursor.execute(
+        """
+        SELECT Orden, TipoAprobador, ProfileCode, Descripcion
+        FROM dbo.WF_FlujoConfig
+        WHERE Activo = 1
+          AND TipoSolicitud = ?
+          AND Company = CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM dbo.WF_FlujoConfig x
+                    WHERE x.Activo = 1 AND x.TipoSolicitud = ? AND x.Company = ?
+                ) THEN ?
+                ELSE ''
+            END
+        ORDER BY Orden
+        """,
+        (tipo_s, tipo_s, cia, cia),
+    )
+    out = []
+    for r in cursor.fetchall():
+        out.append({
+            'Orden': int(r[0]),
+            'TipoAprobador': str(r[1] or '').strip().upper(),
+            'ProfileCode': (str(r[2]).strip() if r[2] else None) or None,
+            'Descripcion': str(r[3] or '').strip() or None,
+        })
+    return out or default
+
+
+def _wf_obtener_cc_row(cursor, company, cost_center):
+    cia = str(company or '').strip()
+    cc = str(cost_center or '').strip()
+    if not cia or not cc:
+        return None
+    cursor.execute(
+        """
+        SELECT TOP 1
+            CostCenter, CCCode, Name, Description, CCLevel,
+            NULLIF(LTRIM(RTRIM(boss)), ''),
+            NULLIF(LTRIM(RTRIM(ParentLevel1)), ''),
+            NULLIF(LTRIM(RTRIM(ParentLevel2)), ''),
+            NULLIF(LTRIM(RTRIM(parentlevel3)), '')
+        FROM dbo.AC_CostCenter
+        WHERE Company = ? AND CostCenter = ?
+        """,
+        (cia, cc),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        'CostCenter': str(row[0] or '').strip(),
+        'CCCode': str(row[1] or '').strip(),
+        'Name': str(row[2] or '').strip(),
+        'Description': str(row[3] or '').strip(),
+        'CCLevel': row[4],
+        'boss': str(row[5] or '').strip() if row[5] else '',
+        'ParentLevel1': str(row[6] or '').strip() if row[6] else '',
+        'ParentLevel2': str(row[7] or '').strip() if row[7] else '',
+        'ParentLevel3': str(row[8] or '').strip() if row[8] else '',
+    }
+
+
+def _wf_cadena_centros_costo(cursor, company, cost_center_inicial):
+    """Recorre el CC del colaborador y sus padres (ParentLevel1→2→3)."""
+    cadena = []
+    visitados = set()
+    actual = str(cost_center_inicial or '').strip()
+    while actual and actual not in visitados:
+        visitados.add(actual)
+        row = _wf_obtener_cc_row(cursor, company, actual)
+        if not row:
+            break
+        cadena.append(row)
+        # Softland guarda el padre como CostCenter id en ParentLevel*
+        siguiente = row.get('ParentLevel1') or row.get('ParentLevel2') or row.get('ParentLevel3') or ''
+        # Si ParentLevel1 apunta al mismo nivel descriptivo, preferir el primer padre no vacío distinto
+        for key in ('ParentLevel1', 'ParentLevel2', 'ParentLevel3'):
+            cand = str(row.get(key) or '').strip()
+            if cand and cand != actual and cand not in visitados:
+                siguiente = cand
+                break
+        else:
+            siguiente = ''
+        actual = siguiente
+    return cadena
+
+
+def _wf_resolver_pasos_materializados(cursor, company, person):
+    """
+    Arma la lista de pasos a insertar:
+    - JEFE_CC_CADENA → un paso por cada CC con boss (deduplicado)
+    - fallback BossPerson del empleado si la cadena no aportó jefes
+    - ROL_PERFIL → paso final RRHH
+    """
+    cia = str(company or '').strip()
+    per = str(person or '').strip()
+    cursor.execute(
+        """
+        SELECT TOP 1
+            NULLIF(LTRIM(RTRIM(CostCenter)), ''),
+            NULLIF(LTRIM(RTRIM(BossPerson)), '')
+        FROM dbo.PR_Employee
+        WHERE Company = ? AND Person = ?
+        """,
+        (cia, per),
+    )
+    emp = cursor.fetchone()
+    cost_center = str(emp[0] or '').strip() if emp and emp[0] else ''
+    boss_person_fallback = str(emp[1] or '').strip() if emp and emp[1] else ''
+
+    config = _wf_leer_config(cursor, cia, 'VACACIONES')
+    pasos = []
+    nivel = 0
+    jefes_ya = set()
+
+    for cfg in config:
+        tipo = str(cfg.get('TipoAprobador') or '').upper()
+        if tipo == 'JEFE_CC_CADENA':
+            cadena = _wf_cadena_centros_costo(cursor, cia, cost_center) if cost_center else []
+            for cc_row in cadena:
+                boss = str(cc_row.get('boss') or '').strip()
+                if not boss or boss == per or boss in jefes_ya:
+                    continue
+                jefes_ya.add(boss)
+                nivel += 1
+                code = cc_row.get('CCCode') or cc_row.get('Name') or cc_row.get('CostCenter')
+                pasos.append({
+                    'Nivel': nivel,
+                    'TipoAprobador': 'JEFE_CC',
+                    'CostCenter': cc_row.get('CostCenter'),
+                    'CostCenterCode': code,
+                    'AprobadorPerson': boss,
+                    'ProfileCode': None,
+                    'Descripcion': f'Jefe CC {code}' if code else 'Jefe inmediato (Centro de Costo)',
+                })
+            if not any(p['TipoAprobador'] == 'JEFE_CC' for p in pasos) and boss_person_fallback and boss_person_fallback != per:
+                nivel += 1
+                jefes_ya.add(boss_person_fallback)
+                pasos.append({
+                    'Nivel': nivel,
+                    'TipoAprobador': 'JEFE_CC',
+                    'CostCenter': cost_center or None,
+                    'CostCenterCode': None,
+                    'AprobadorPerson': boss_person_fallback,
+                    'ProfileCode': None,
+                    'Descripcion': 'Jefe inmediato (BossPerson)',
+                })
+        elif tipo == 'ROL_PERFIL':
+            nivel += 1
+            perfil = str(cfg.get('ProfileCode') or 'APROBADOR').strip() or 'APROBADOR'
+            desc = cfg.get('Descripcion') or f'Perfil {perfil}'
+            pasos.append({
+                'Nivel': nivel,
+                'TipoAprobador': 'ROL_PERFIL',
+                'CostCenter': None,
+                'CostCenterCode': None,
+                'AprobadorPerson': None,
+                'ProfileCode': perfil,
+                'Descripcion': desc,
+            })
+    if not pasos:
+        # Último recurso: solo RRHH (comportamiento previo de 1 nivel)
+        pasos.append({
+            'Nivel': 1,
+            'TipoAprobador': 'ROL_PERFIL',
+            'CostCenter': None,
+            'CostCenterCode': None,
+            'AprobadorPerson': None,
+            'ProfileCode': 'APROBADOR',
+            'Descripcion': 'Gestión de RR.HH. / Personal',
+        })
+    return pasos
+
+
+def crear_pasos_flujo_solicitud_vacaciones(company, person, line, cursor=None):
+    """Inserta WF_SolicitudPaso para una solicitud nueva. Idempotente."""
+    own_conn = cursor is None
+    conn = None
+    try:
+        if own_conn:
+            conn = DatabaseConfig.get_connection()
+            cursor = conn.cursor()
+        if not _wf_tablas_listas(cursor):
+            return False
+        cia = str(company or '').strip()
+        per = str(person or '').strip()
+        line_i = int(line)
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
+            WHERE Company = ? AND Person = ? AND Line = ?
+            """,
+            (cia, per, line_i),
+        )
+        if int((cursor.fetchone() or [0])[0] or 0) > 0:
+            return True
+        pasos = _wf_resolver_pasos_materializados(cursor, cia, per)
+        for p in pasos:
+            cursor.execute(
+                """
+                INSERT INTO dbo.WF_SolicitudPaso (
+                    Company, Person, Line, Nivel, TipoAprobador,
+                    CostCenter, CostCenterCode, AprobadorPerson, ProfileCode,
+                    Descripcion, Estado
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'P')
+                """,
+                (
+                    cia, per, line_i, int(p['Nivel']), p['TipoAprobador'],
+                    p.get('CostCenter'), p.get('CostCenterCode'),
+                    p.get('AprobadorPerson'), p.get('ProfileCode'),
+                    (p.get('Descripcion') or '')[:120],
+                ),
+            )
+        if own_conn:
+            conn.commit()
+        return True
+    except Exception as e:
+        print(f'Error en crear_pasos_flujo_solicitud_vacaciones: {e}')
+        if own_conn and conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+    finally:
+        if own_conn and conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def asegurar_pasos_flujo_solicitud_vacaciones(company, person, line):
+    """Crea pasos si la solicitud P aún no los tiene (migración suave)."""
+    return crear_pasos_flujo_solicitud_vacaciones(company, person, line)
+
+
+def get_pasos_flujo_solicitud_vacaciones(company, person, line):
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        if not _wf_tablas_listas(cursor):
+            return []
+        cursor.execute(
+            """
+            SELECT Nivel, TipoAprobador, CostCenter, CostCenterCode,
+                   AprobadorPerson, ProfileCode, Descripcion, Estado,
+                   UserID, FechaRespuesta, Observacion
+            FROM dbo.WF_SolicitudPaso
+            WHERE Company = ? AND Person = ? AND Line = ?
+            ORDER BY Nivel
+            """,
+            (str(company or '').strip(), str(person or '').strip(), int(line)),
+        )
+        cols = [c[0] for c in cursor.description]
+        rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f'Error en get_pasos_flujo_solicitud_vacaciones: {e}')
+        return []
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def resumir_estado_flujo_vacaciones(pasos, status_solicitud=None):
+    """Chip / texto para historial y bandeja."""
+    status_sol = str(status_solicitud or '').strip().upper()
+    pasos = list(pasos or [])
+    if not pasos:
+        if status_sol == 'A':
+            return {
+                'codigo': 'APROBADO', 'label': 'Aprobado', 'chip': 'success',
+                'nivel_actual': None, 'total_niveles': 0, 'detalle': 'Aprobado',
+            }
+        if status_sol == 'R':
+            return {
+                'codigo': 'RECHAZADO', 'label': 'Rechazado', 'chip': 'danger',
+                'nivel_actual': None, 'total_niveles': 0, 'detalle': 'Rechazado',
+            }
+        return {
+            'codigo': 'PENDIENTE', 'label': 'Pendiente', 'chip': 'warning',
+            'nivel_actual': None, 'total_niveles': 0, 'detalle': 'Pendiente',
+        }
+
+    total = len(pasos)
+    if any(str(p.get('Estado') or '').upper() == 'R' for p in pasos) or status_sol == 'R':
+        rechazo = next((p for p in pasos if str(p.get('Estado') or '').upper() == 'R'), None)
+        det = (rechazo or {}).get('Descripcion') or 'Rechazado'
+        obs = str((rechazo or {}).get('Observacion') or '').strip()
+        return {
+            'codigo': 'RECHAZADO', 'label': 'Rechazado', 'chip': 'danger',
+            'nivel_actual': (rechazo or {}).get('Nivel'), 'total_niveles': total,
+            'detalle': f'Rechazado — {det}' + (f': {obs}' if obs else ''),
+        }
+    pend = next((p for p in pasos if str(p.get('Estado') or '').upper() == 'P'), None)
+    if pend is None or status_sol == 'A':
+        return {
+            'codigo': 'APROBADO', 'label': 'Aprobado', 'chip': 'success',
+            'nivel_actual': total, 'total_niveles': total,
+            'detalle': f'Aprobado ({total}/{total})',
+        }
+    nivel = int(pend.get('Nivel') or 0)
+    desc = str(pend.get('Descripcion') or '').strip() or f'Nivel {nivel}'
+    chip = 'warning' if nivel <= 1 else 'info'
+    return {
+        'codigo': 'EN_APROBACION',
+        'label': f'En aprobación ({nivel}/{total})',
+        'chip': chip,
+        'nivel_actual': nivel,
+        'total_niveles': total,
+        'detalle': f'Nivel {nivel}/{total}: {desc}',
+    }
+
+
+def usuario_puede_actuar_paso_vacaciones(paso, person_actor, profilecode, menus=None, unrestricted=False, web_admin=False):
+    """True si el usuario actual puede aprobar/rechazar el paso pendiente."""
+    if not paso or str(paso.get('Estado') or '').upper() != 'P':
+        return False
+    tipo = str(paso.get('TipoAprobador') or '').upper()
+    per = str(person_actor or '').strip()
+    if tipo == 'JEFE_CC':
+        return bool(per) and per == str(paso.get('AprobadorPerson') or '').strip()
+    if tipo == 'ROL_PERFIL':
+        # Acceso a la bandeja = menú; firma RRHH = perfil (p.ej. APROBADOR).
+        # Así un jefe con menú "aprobar_vacaciones" no cierra el nivel RRHH.
+        if unrestricted or web_admin:
+            return True
+        perfil_req = str(paso.get('ProfileCode') or 'APROBADOR').strip().upper()
+        perfil_user = str(profilecode or '').strip().upper()
+        return bool(perfil_user) and perfil_user == perfil_req
+    return False
+
+
+def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_actor, profilecode,
+                                     menus=None, unrestricted=False, web_admin=False):
+    """
+    Devuelve dict con paso pendiente y flags can_approve / can_reject / requires_sustento.
+    """
+    asegurar_pasos_flujo_solicitud_vacaciones(company, person_solicitud, line)
+    pasos = get_pasos_flujo_solicitud_vacaciones(company, person_solicitud, line)
+    resumen = resumir_estado_flujo_vacaciones(pasos)
+    pend = next((p for p in pasos if str(p.get('Estado') or '').upper() == 'P'), None)
+    can = usuario_puede_actuar_paso_vacaciones(
+        pend, person_actor, profilecode, menus=menus,
+        unrestricted=unrestricted, web_admin=web_admin,
+    ) if pend else False
+    es_final = bool(pend) and int(pend.get('Nivel') or 0) == len(pasos)
+    es_rrhh = bool(pend) and str(pend.get('TipoAprobador') or '').upper() == 'ROL_PERFIL'
+    return {
+        'pasos': pasos,
+        'resumen': resumen,
+        'paso_pendiente': pend,
+        'can_approve': can,
+        'can_reject': can,
+        # Sustento PDF opcional en nivel final RRHH (demo sin impacto planilla).
+        'requires_sustento': False,
+        'can_upload_sustento': bool(can and es_final and es_rrhh),
+        'es_nivel_final': es_final,
+    }
+
+
+def _wf_marcar_paso(cursor, company, person, line, nivel, estado, user_id, observacion=None):
+    cursor.execute(
+        """
+        UPDATE dbo.WF_SolicitudPaso
+        SET Estado = ?,
+            UserID = ?,
+            FechaRespuesta = GETDATE(),
+            Observacion = ?
+        WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ? AND Estado = 'P'
+        """,
+        (
+            str(estado).upper()[:1],
+            str(user_id or '').strip()[:20],
+            (observacion or '')[:500] or None,
+            str(company or '').strip(),
+            str(person or '').strip(),
+            int(line),
+            int(nivel),
+        ),
+    )
+    return cursor.rowcount > 0
+
+
+def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_actor,
+                                  profilecode=None, menus=None, unrestricted=False, web_admin=False,
+                                  observacion=None, drive_file_id=None):
+    """
+    Aprueba el paso pendiente que le corresponde al actor.
+    Si es el último nivel: status solicitud = A (+ sustento opcional en Comments).
+    Si no: deja status = P.
+    Retorna (ok: bool, mensaje: str, info: dict)
+    """
+    conn = None
+    try:
+        info = resolver_accion_flujo_vacaciones(
+            company, person, line, person_actor, profilecode,
+            menus=menus, unrestricted=unrestricted, web_admin=web_admin,
+        )
+        if not info.get('can_approve'):
+            return False, 'No tiene pendiente de aprobación en esta solicitud.', info
+        pend = info['paso_pendiente']
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        cia = str(company or '').strip()
+        per = str(person or '').strip()
+        line_i = int(line)
+        user = str(approval_user or '').strip()[:20]
+
+        if not _wf_marcar_paso(cursor, cia, per, line_i, pend['Nivel'], 'A', user, observacion):
+            conn.rollback()
+            return False, 'El paso ya fue resuelto por otro usuario.', info
+
+        es_final = info.get('es_nivel_final')
+        if es_final:
+            comments = None
+            drive_id = str(drive_file_id or '').strip()
+            if drive_id:
+                comments = f'SUSTENTO_DRIVE:{drive_id}'[:255]
+            if pk == 'Line':
+                if comments:
+                    cursor.execute(
+                        """
+                        UPDATE PR_SolicitudVacaciones
+                        SET status = 'A',
+                            ApprovalUser = ?,
+                            ApprovalDate = GETDATE(),
+                            Comments = ?,
+                            xlastuser = ?,
+                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                        WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
+                        """,
+                        (user, comments, user, line_i, cia, per),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE PR_SolicitudVacaciones
+                        SET status = 'A',
+                            ApprovalUser = ?,
+                            ApprovalDate = GETDATE(),
+                            xlastuser = ?,
+                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                        WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
+                        """,
+                        (user, user, line_i, cia, per),
+                    )
+            else:
+                if comments:
+                    cursor.execute(
+                        """
+                        UPDATE PR_SolicitudVacaciones
+                        SET status = 'A',
+                            ApprovalUser = ?,
+                            ApprovalDate = GETDATE(),
+                            Comments = ?,
+                            xlastuser = ?,
+                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                        WHERE Id = ? AND Company = ? AND status = 'P'
+                        """,
+                        (user, comments, user, line_i, cia),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE PR_SolicitudVacaciones
+                        SET status = 'A',
+                            ApprovalUser = ?,
+                            ApprovalDate = GETDATE(),
+                            xlastuser = ?,
+                            xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                        WHERE Id = ? AND Company = ? AND status = 'P'
+                        """,
+                        (user, user, line_i, cia),
+                    )
+            if cursor.rowcount <= 0:
+                conn.rollback()
+                return False, 'No se pudo cerrar la solicitud (ya no está pendiente).', info
+            msg = 'Solicitud aprobada en todos los niveles.'
+        else:
+            # Mantener P; opcionalmente anotar xlastuser
+            if pk == 'Line':
+                cursor.execute(
+                    """
+                    UPDATE PR_SolicitudVacaciones
+                    SET xlastuser = ?,
+                        xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                    WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
+                    """,
+                    (user, line_i, cia, per),
+                )
+            msg = (
+                f"Nivel {pend.get('Nivel')} aprobado "
+                f"({pend.get('Descripcion') or ''}). Pasa al siguiente nivel."
+            )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        info2 = resolver_accion_flujo_vacaciones(
+            company, person, line, person_actor, profilecode,
+            menus=menus, unrestricted=unrestricted, web_admin=web_admin,
+        )
+        return True, msg, info2
+    except Exception as e:
+        print(f'Error en aprobar_paso_flujo_vacaciones: {e}')
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False, str(e), {}
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def rechazar_paso_flujo_vacaciones(company, person, line, approval_user, person_actor,
+                                   profilecode=None, menus=None, unrestricted=False, web_admin=False,
+                                   observacion=None):
+    """Rechaza el paso actual y cierra la solicitud en R. Motivo obligatorio."""
+    motivo = str(observacion or '').strip()
+    if not motivo:
+        return False, 'El motivo de rechazo es obligatorio.', {}
+    conn = None
+    try:
+        info = resolver_accion_flujo_vacaciones(
+            company, person, line, person_actor, profilecode,
+            menus=menus, unrestricted=unrestricted, web_admin=web_admin,
+        )
+        if not info.get('can_reject'):
+            return False, 'No tiene pendiente de rechazo en esta solicitud.', info
+        pend = info['paso_pendiente']
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        cia = str(company or '').strip()
+        per = str(person or '').strip()
+        line_i = int(line)
+        user = str(approval_user or '').strip()[:20]
+
+        if not _wf_marcar_paso(cursor, cia, per, line_i, pend['Nivel'], 'R', user, motivo):
+            conn.rollback()
+            return False, 'El paso ya fue resuelto por otro usuario.', info
+
+        # Cancelar restantes pendientes
+        cursor.execute(
+            """
+            UPDATE dbo.WF_SolicitudPaso
+            SET Estado = 'R',
+                UserID = ?,
+                FechaRespuesta = GETDATE(),
+                Observacion = ?
+            WHERE Company = ? AND Person = ? AND Line = ? AND Estado = 'P'
+            """,
+            (user, f'Cerrado por rechazo en nivel {pend.get("Nivel")}'[:500], cia, per, line_i),
+        )
+
+        if pk == 'Line':
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'R',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    Comments = ?,
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Line = ? AND Company = ? AND Person = ? AND status = 'P'
+                """,
+                (user, motivo[:255], user, line_i, cia, per),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'R',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    Comments = ?,
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Id = ? AND Company = ? AND status = 'P'
+                """,
+                (user, motivo[:255], user, line_i, cia),
+            )
+        if cursor.rowcount <= 0:
+            conn.rollback()
+            return False, 'No se pudo rechazar la solicitud (ya no está pendiente).', info
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, 'Solicitud rechazada.', info
+    except Exception as e:
+        print(f'Error en rechazar_paso_flujo_vacaciones: {e}')
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False, str(e), {}
     finally:
         if conn:
             try:
