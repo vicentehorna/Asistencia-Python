@@ -136,7 +136,7 @@
                 <input type="text" id="txtDni" class="form-control form-control-sm" placeholder="Buscar..." maxlength="20" autocomplete="off">
             </div>
             <div class="col-12 d-flex align-items-center flex-wrap gap-2 border-top pt-3 mt-3">
-                <button type="submit" class="btn btn-primary btn-sm px-4"><i class="bi bi-search"></i> Consultar</button>
+                <button type="submit" class="btn btn-primary btn-sm px-4" id="btnBuscarAprobarVac"><i class="bi bi-search"></i> Consultar</button>
                 <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcelAprobarVac" disabled><i class="bi bi-file-earmark-excel"></i> Exportar a Excel</button>
                 <span class="ms-auto text-muted small fw-bold">No. de Registros: <span id="lblRowCountAprobarVac">0</span></span>
             </div>
@@ -271,6 +271,16 @@ document.addEventListener('DOMContentLoaded', async function () {
     let lastRowsMetaAprobarVac = [];
     let modalSustentoInst = null;
     let modalRechazoInst = null;
+
+    function refrescarConsultaAprobarVac() {
+        const frm = document.getElementById('frmAprobarVacaciones');
+        if (frm && typeof frm.requestSubmit === 'function') {
+            frm.requestSubmit();
+            return;
+        }
+        const btn = document.getElementById('btnBuscarAprobarVac');
+        if (btn) btn.click();
+    }
 
     function escapeHtml(s) {
         return String(s || '')
@@ -467,7 +477,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                         return;
                     }
                     alert((data && data.message) || 'Nivel aprobado.');
-                    document.getElementById('btnBuscarAprobarVac').click();
+                    refrescarConsultaAprobarVac();
                 } catch (err) {
                     console.error(err);
                     alert('Error de red al aprobar: ' + (err && err.message ? err.message : String(err)));
@@ -804,7 +814,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                     return;
                 }
                 if (modalRechazoInst) modalRechazoInst.hide();
-                document.getElementById('btnBuscarAprobarVac').click();
+                refrescarConsultaAprobarVac();
             } catch (err) {
                 console.error(err);
                 errEl.textContent = 'Error de red al rechazar.';
