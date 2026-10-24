@@ -282,6 +282,23 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (btn) btn.click();
     }
 
+    function hmExito(mensaje) {
+        if (window.HmUi) HmUi.exito(mensaje);
+        else alert(mensaje);
+    }
+
+    function hmError(mensaje) {
+        if (window.HmUi) HmUi.error(mensaje);
+        else alert(mensaje);
+    }
+
+    async function hmConfirmar(opciones) {
+        if (window.HmUi && typeof HmUi.confirmar === 'function') {
+            return HmUi.confirmar(opciones);
+        }
+        return window.confirm((opciones && (opciones.mensaje || opciones.message)) || '¿Confirmar?');
+    }
+
     function escapeHtml(s) {
         return String(s || '')
             .replace(/&/g, '&amp;')
@@ -446,7 +463,17 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
         tbody.querySelectorAll('.btn-aprobar-nivel').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('¿Confirma aprobar el nivel pendiente de esta solicitud?')) return;
+                const person = btn.getAttribute('data-person-dni') || '';
+                const okConfirm = await hmConfirmar({
+                    titulo: 'Aprobar solicitud',
+                    mensaje: '¿Confirma aprobar el nivel pendiente de esta solicitud'
+                        + (person ? ' del trabajador ' + person : '')
+                        + '?\n\nLa solicitud avanzará al siguiente nivel o quedará aprobada si es el último.',
+                    textoOk: 'Aprobar',
+                    textoCancelar: 'Cancelar',
+                    variant: 'primary',
+                });
+                if (!okConfirm) return;
                 btn.disabled = true;
                 try {
                     const res = await fetch(URL_APROBAR_NIVEL, {
@@ -459,7 +486,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                         },
                         body: JSON.stringify({
                             solicitud_id: btn.getAttribute('data-solicitud-id'),
-                            person: btn.getAttribute('data-person-dni'),
+                            person: person,
                         }),
                     });
                     const raw = await res.text();
@@ -469,18 +496,18 @@ document.addEventListener('DOMContentLoaded', async function () {
                         const detail = (data && data.error)
                             || (raw && raw.indexOf('<') === -1 ? raw.slice(0, 240) : '')
                             || ('No se pudo aprobar (HTTP ' + res.status + ').');
-                        alert(detail);
+                        hmError(detail);
                         return;
                     }
                     if (!(data && data.ok)) {
-                        alert((data && data.error) || 'Respuesta inválida del servidor al aprobar.');
+                        hmError((data && data.error) || 'Respuesta inválida del servidor al aprobar.');
                         return;
                     }
-                    alert((data && data.message) || 'Nivel aprobado.');
+                    hmExito((data && data.message) || 'Nivel aprobado correctamente.');
                     refrescarConsultaAprobarVac();
                 } catch (err) {
                     console.error(err);
-                    alert('Error de red al aprobar: ' + (err && err.message ? err.message : String(err)));
+                    hmError('Error de red al aprobar: ' + (err && err.message ? err.message : String(err)));
                 } finally {
                     btn.disabled = false;
                 }
@@ -550,12 +577,12 @@ document.addEventListener('DOMContentLoaded', async function () {
                     if (j && j.error) detail = j.error;
                     if (j && j.code) detail += ' (Ref. soporte: ' + j.code + ')';
                 } catch (e2) { /* no es JSON */ }
-                alert(detail);
+                hmError(detail);
                 return;
             }
             const ctype = (res.headers.get('Content-Type') || '').toLowerCase();
             if (ctype.indexOf('text/html') !== -1) {
-                alert('La sesión pudo haber expirado. Vuelva a iniciar sesión e intente de nuevo.');
+                hmError('La sesión pudo haber expirado. Vuelva a iniciar sesión e intente de nuevo.');
                 return;
             }
             const blob = await res.blob();
@@ -570,7 +597,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             URL.revokeObjectURL(a.href);
         } catch (err) {
             console.error(err);
-            alert('Error de red al descargar el sustento.');
+            hmError('Error de red al descargar el sustento.');
         } finally {
             btn.disabled = false;
             if (icon) icon.classList.remove('opacity-50');
@@ -579,7 +606,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     async function exportAprobarVacExcel(payload, meta) {
         if (typeof ExcelJS === 'undefined') {
-            alert('No se pudo cargar la librería de Excel (ExcelJS). Recargue la página e intente de nuevo.');
+            hmError('No se pudo cargar la librería de Excel (ExcelJS). Recargue la página e intente de nuevo.');
             return;
         }
         const headersAll = payload.headers || [];
@@ -706,17 +733,17 @@ document.addEventListener('DOMContentLoaded', async function () {
             if (!res.ok) {
                 document.getElementById('cardResultadoAprobarVac').classList.add('d-none');
                 document.getElementById('lblRowCountAprobarVac').textContent = '0';
-                alert(payload.error || 'Error al generar el reporte.');
+                hmError(payload.error || 'Error al generar el reporte.');
                 return;
             }
             if (payload.error) {
                 document.getElementById('cardResultadoAprobarVac').classList.add('d-none');
                 document.getElementById('lblRowCountAprobarVac').textContent = '0';
-                alert(payload.error);
+                hmError(payload.error);
                 return;
             }
             if (!Array.isArray(payload.headers) || !Array.isArray(payload.data)) {
-                alert('Respuesta inválida del servidor.');
+                hmError('Respuesta inválida del servidor.');
                 return;
             }
             document.getElementById('cardResultadoAprobarVac').classList.remove('d-none');
@@ -739,7 +766,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             document.getElementById('cardResultadoAprobarVac').classList.add('d-none');
             document.getElementById('btnExportExcelAprobarVac').disabled = true;
             document.getElementById('lblRowCountAprobarVac').textContent = '0';
-            alert('Error de red o del servidor.');
+            hmError('Error de red o del servidor.');
         }
     }
 
@@ -814,6 +841,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                     return;
                 }
                 if (modalRechazoInst) modalRechazoInst.hide();
+                hmExito((data && data.message) || 'Solicitud rechazada.');
                 refrescarConsultaAprobarVac();
             } catch (err) {
                 console.error(err);
@@ -848,7 +876,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                     return;
                 }
                 if (modalSustentoInst) modalSustentoInst.hide();
-                alert(data.message || 'Solicitud aprobada y sustento cargado.');
+                hmExito(data.message || 'Solicitud aprobada y sustento cargado.');
                 await ejecutarConsulta();
             } catch (err) {
                 console.error(err);
@@ -895,7 +923,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     document.getElementById('btnExportExcelAprobarVac').addEventListener('click', async function () {
         if (!lastExportAprobarVac || !lastExportAprobarVac.headers || !lastExportAprobarVac.headers.length) {
-            alert('Ejecute primero una búsqueda con resultados.');
+            hmError('Ejecute primero una búsqueda con resultados.');
             return;
         }
         try {
@@ -905,7 +933,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             );
         } catch (err) {
             console.error(err);
-            alert('No se pudo generar el archivo Excel.');
+            hmError('No se pudo generar el archivo Excel.');
         }
     });
 });
