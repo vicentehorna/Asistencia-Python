@@ -422,6 +422,17 @@
                 </li>
                 {% endif %}
 
+                {% if can_menu('aprobar_vacaciones') %}
+                <li class="py-0">
+                    <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Aprobaciones</p>
+                </li>
+                <li class="{{ 'active' if request.endpoint == 'reporte_aprobar_vacaciones_page' else '' }}">
+                    <a href="{{ url_for('reporte_aprobar_vacaciones_page') }}" title="Aprobar Vacaciones">
+                        <i class="bi bi-check2-square"></i><span class="sidebar-link-text">Aprobar Vacaciones</span>
+                    </a>
+                </li>
+                {% endif %}
+
                 <li class="py-0">
                     <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Seguridad</p>
                 </li>

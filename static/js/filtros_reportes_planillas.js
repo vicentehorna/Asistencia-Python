@@ -9,6 +9,7 @@
     const STORAGE_KEY_PLANILLA_VERTICAL = 'filtros_planilla_vertical';
     const STORAGE_KEY_VACACIONES_DETALLE = 'filtros_vacaciones_detalle';
     const STORAGE_KEY_SALDO_VACACIONES = 'filtros_saldo_vacaciones';
+    const STORAGE_KEY_APROBAR_VACACIONES = 'filtros_aprobar_vacaciones';
 
     function val(id) {
         const el = document.getElementById(id);
@@ -332,12 +333,57 @@
         };
     }
 
+    function crearPersistenciaAprobarVacaciones() {
+        function guardar() {
+            try {
+                const estado = {
+                    cia: val('cboCompania'),
+                    person: val('cboTrabajador'),
+                    dni: val('txtDni'),
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(STORAGE_KEY_APROBAR_VACACIONES, JSON.stringify(estado));
+            } catch (e) {
+                console.warn('filtros aprobar vacaciones: no se pudo guardar', e);
+            }
+        }
+
+        function leer() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY_APROBAR_VACACIONES);
+                if (!raw) return null;
+                const o = JSON.parse(raw);
+                if (!o || typeof o !== 'object') return null;
+                return o;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function registrarGuardadoEnCambio() {
+            ['cboTrabajador', 'txtDni'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', guardar);
+            });
+            const inpDni = document.getElementById('txtDni');
+            if (inpDni) inpDni.addEventListener('input', guardar);
+        }
+
+        return {
+            STORAGE_KEY: STORAGE_KEY_APROBAR_VACACIONES,
+            guardar,
+            leer,
+            registrarGuardadoEnCambio
+        };
+    }
+
     global.FiltrosPlanillasReportes = {
         STORAGE_KEY_RESUMEN_TOTAL,
         STORAGE_KEY_PROMEDIO_LIQ,
         STORAGE_KEY_PLANILLA_VERTICAL,
         STORAGE_KEY_VACACIONES_DETALLE,
         STORAGE_KEY_SALDO_VACACIONES,
+        STORAGE_KEY_APROBAR_VACACIONES,
         resumenTotal: function () {
             return crearPersistenciaReporte(STORAGE_KEY_RESUMEN_TOTAL, false);
         },
@@ -352,6 +398,9 @@
         },
         saldoVacaciones: function () {
             return crearPersistenciaSaldoVacaciones();
+        },
+        aprobarVacaciones: function () {
+            return crearPersistenciaAprobarVacaciones();
         }
     };
 })(typeof window !== 'undefined' ? window : this);

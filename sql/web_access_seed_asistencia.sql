@@ -25,7 +25,8 @@ USING (VALUES
     ('acceso_marcador',      'Acceso al Marcador',        'seguridad',      410, 'acceso_marcador',        '/seguridad/acceso-marcador', 'A'),
     ('solicitud_vacaciones', 'Solicitud de Vacaciones',   'portal_trabajador', 510, 'solicitud_vacaciones_page', '/solicitud-vacaciones', 'A'),
     ('detalle_vacaciones',   'Detalle de Vacaciones',     'portal_trabajador', 520, 'reporte_vacaciones_detalle_page', '/reporte-vacaciones-detalle', 'A'),
-    ('saldo_vacaciones',     'Saldo de Vacaciones',       'portal_trabajador', 530, 'reporte_saldo_vacaciones_page', '/reporte-saldo-vacaciones', 'A')
+    ('saldo_vacaciones',     'Saldo de Vacaciones',       'portal_trabajador', 530, 'reporte_saldo_vacaciones_page', '/reporte-saldo-vacaciones', 'A'),
+    ('aprobar_vacaciones',   'Aprobar Vacaciones',        'aprobaciones',      610, 'reporte_aprobar_vacaciones_page', '/reporte-aprobar-vacaciones', 'A')
 ) AS s (MenuCode, Title, ParentCode, SortOrder, Endpoint, RoutePrefix, Status)
 ON t.MenuCode = s.MenuCode
 WHEN MATCHED THEN
@@ -61,7 +62,8 @@ WHERE m.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador','solicitud_vacaciones','detalle_vacaciones','saldo_vacaciones'
+      'acceso_marcador','solicitud_vacaciones','detalle_vacaciones','saldo_vacaciones',
+      'aprobar_vacaciones'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
@@ -80,7 +82,8 @@ WHERE p.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador','solicitud_vacaciones','detalle_vacaciones','saldo_vacaciones'
+      'acceso_marcador','solicitud_vacaciones','detalle_vacaciones','saldo_vacaciones',
+      'aprobar_vacaciones'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x

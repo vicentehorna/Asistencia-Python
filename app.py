@@ -9,7 +9,7 @@ from decimal import Decimal
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from dotenv import load_dotenv
 
@@ -56,6 +56,18 @@ from database import (
     consultar_saldo_vacaciones_solicitud,
     get_max_dias_vacaciones,
     fecha_hoy_peru,
+    _clave_solicitud_vacaciones,
+    obtener_sustento_drive_ids_por_solicitudes,
+    obtener_drive_file_id_sustento_vacaciones,
+    aprobar_solicitud_vacaciones_con_sustento,
+)
+from google_drive import (
+    carpeta_sustento_vacaciones_desde_env,
+    nombre_archivo_sustento_vacaciones,
+    subir_pdf_sustento_drive,
+    descargar_archivo_drive,
+    mensaje_error_drive_para_usuario,
+    codigo_error_drive_para_soporte,
 )
 
 load_dotenv()
@@ -1028,6 +1040,37 @@ def _reporte_filtros_perfil_template_context():
     }
 
 
+def _reporte_compania_usuario_logueado():
+    """Compañía del usuario logueado (sesión)."""
+    ensure_user_session()
+    return str(session.get('company') or getattr(current_user, 'company', None) or '').strip()
+
+
+def _reporte_aprobar_vacaciones_template_context():
+    """Aprobar Vacaciones: compañía fija del usuario logueado."""
+    ensure_user_session()
+    cia = _reporte_compania_usuario_logueado()
+    return {
+        'minero_restringe_compania': True,
+        'minero_compania_codigo': cia,
+        'minero_compania_text': _descripcion_compania_selector(cia) if cia else cia,
+        'simple_restringe_trabajador': False,
+        'simple_trabajador_codigo': '',
+        'simple_trabajador_nombre': '',
+    }
+
+
+def _status_vacaciones_reporte_text(status_code):
+    code = str(status_code or '').strip().upper()
+    if code == 'A':
+        return 'Aprobado'
+    if code == 'R':
+        return 'Rechazado'
+    if code == 'P':
+        return 'Pendiente'
+    return str(status_code or '').strip()
+
+
 def _fmt_periodo_yyyy_mm(val):
     """Periodo para columnas de reporte: YYYY-MM (p. ej. 20250301 → 2025-03)."""
     if val is None:
@@ -1425,6 +1468,214 @@ def reporte_saldo_vacaciones_post():
                 conn.close()
             except Exception:
                 pass
+
+
+@app.route('/reporte-aprobar-vacaciones')
+@login_required
+def reporte_aprobar_vacaciones_page():
+    ensure_user_session()
+    return render_template(
+        'reporte_aprobar_vacaciones.html',
+        **_reporte_aprobar_vacaciones_template_context(),
+    )
+
+
+@app.route('/reporte_aprobar_vacaciones', methods=['POST'])
+@login_required
+def reporte_aprobar_vacaciones_post():
+    """sp_pr_aprobarvacaciones_web @cia, @person, @dni."""
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = _reporte_compania_usuario_logueado()
+    if not cia:
+        cia = str(body.get('cia') or '').strip()
+    person = str(body.get('person') or '0').strip() or '0'
+    dni = str(body.get('dni') or '').strip()
+
+    if not cia:
+        return jsonify({'error': 'No se pudo identificar la compañía del usuario.'}), 400
+
+    headers_es = [
+        'Código', 'Nombre', 'Ejercicio', 'Fecha inicio', 'Fecha fin',
+        'Estado', 'Fecha aprobación',
+    ]
+    keys_datos = [
+        'person', 'name', 'controlyear', 'datebegin', 'dateend',
+        'status', 'approvaldate',
+    ]
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_pr_aprobarvacaciones_web @cia=?, @person=?, @dni=?',
+            (cia, person, dni),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        pares = []
+        for r in rows:
+            if str(r.get('status') or '').strip().upper() == 'A':
+                rid = r.get('id')
+                per = str(r.get('person') or '').strip()
+                if rid is not None and per:
+                    try:
+                        pares.append((per, int(rid)))
+                    except (TypeError, ValueError):
+                        pass
+        mapa_sustento = obtener_sustento_drive_ids_por_solicitudes(cia, pares)
+
+        resultado = []
+        rows_meta = []
+        for r in rows:
+            status_code = str(r.get('status') or '').strip().upper() or 'P'
+            fila = []
+            for key in keys_datos:
+                val = r.get(key)
+                if key == 'status':
+                    fila.append(_status_vacaciones_reporte_text(val))
+                elif key in ('datebegin', 'dateend', 'approvaldate'):
+                    fila.append(fecha_filter(val))
+                else:
+                    fila.append(_jsonable_value(val))
+            resultado.append(fila)
+            sid = r.get('id')
+            try:
+                sid_int = int(sid) if sid is not None else None
+            except (TypeError, ValueError):
+                sid_int = None
+            person_row = str(r.get('person') or '').strip()
+            clave = _clave_solicitud_vacaciones(person_row, sid_int) if sid_int is not None else ''
+            tiene_sustento = bool(clave and mapa_sustento.get(clave))
+            rows_meta.append({
+                'id': _jsonable_value(sid),
+                'person': person_row,
+                'name': str(r.get('name') or '').strip(),
+                'controlyear': str(r.get('controlyear') or '').strip(),
+                'status': status_code,
+                'can_upload': status_code == 'P',
+                'can_download': tiene_sustento,
+            })
+        headers_es.append('Acciones')
+        return jsonify({'headers': headers_es, 'data': resultado, 'rows_meta': rows_meta})
+    except Exception as e:
+        logging.exception('reporte_aprobar_vacaciones_post')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/sustento-vacaciones/descargar')
+@login_required
+def descargar_sustento_vacaciones():
+    """Descarga PDF de sustento desde Drive (Comments: SUSTENTO_DRIVE:...)."""
+    ensure_user_session()
+    json_errors = request.headers.get('X-Fetch-Descarga') == '1'
+    solicitud_id = request.args.get('solicitud_id')
+    person = str(request.args.get('person') or '').strip()
+    company = _reporte_compania_usuario_logueado()
+    if not solicitud_id or not company:
+        if json_errors:
+            return jsonify({'error': 'Solicitud o compañía no indicada.'}), 400
+        flash('Solicitud o compañía no indicada.', 'error')
+        return redirect(url_for('reporte_aprobar_vacaciones_page'))
+
+    drive_id = obtener_drive_file_id_sustento_vacaciones(solicitud_id, company, person=person)
+    if not drive_id:
+        if json_errors:
+            return jsonify({'error': 'No hay sustento PDF registrado para esta solicitud.'}), 404
+        flash('No hay sustento PDF registrado para esta solicitud.', 'error')
+        return redirect(url_for('reporte_aprobar_vacaciones_page'))
+
+    try:
+        archivo_io, nombre_archivo, mime = descargar_archivo_drive(
+            drive_id, app_root=app.root_path
+        )
+    except Exception as e:
+        logging.exception('descargar_sustento_vacaciones solicitud_id=%s', solicitud_id)
+        msg = mensaje_error_drive_para_usuario(e)
+        code = codigo_error_drive_para_soporte(e)
+        if json_errors:
+            return jsonify({'error': msg, 'code': code}), 502
+        flash(msg, 'error')
+        return redirect(url_for('reporte_aprobar_vacaciones_page'))
+
+    return send_file(
+        archivo_io,
+        as_attachment=True,
+        download_name=nombre_archivo,
+        mimetype=mime,
+    )
+
+
+@app.route('/aprobar-vacaciones-con-sustento', methods=['POST'])
+@login_required
+def aprobar_vacaciones_con_sustento():
+    """Sube PDF de sustento a Drive y aprueba la solicitud (status A)."""
+    ensure_user_session()
+    solicitud_id = request.form.get('solicitud_id')
+    person_dni = str(request.form.get('person_dni') or request.form.get('person') or '').strip()
+    control_year = str(request.form.get('control_year') or request.form.get('controlyear') or '').strip()
+    company = _reporte_compania_usuario_logueado()
+    archivo = request.files.get('sustento_pdf')
+
+    if not solicitud_id:
+        return jsonify({'error': 'Solicitud no indicada.'}), 400
+    if not company:
+        return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+    if not archivo or not archivo.filename:
+        return jsonify({'error': 'Seleccione un archivo PDF de sustento.'}), 400
+
+    nombre_orig = str(archivo.filename or '').strip().lower()
+    if not nombre_orig.endswith('.pdf'):
+        return jsonify({'error': 'El sustento debe ser un archivo PDF.'}), 400
+
+    carpeta_info = carpeta_sustento_vacaciones_desde_env()
+    folder_id = carpeta_info.get('folder_id')
+    if not folder_id:
+        return jsonify({
+            'error': (
+                'No hay carpeta de Drive para sustentos. Defina '
+                'GOOGLE_DRIVE_FOLDER_SUSTENTO_VACACIONES con el ID o URL de la carpeta, '
+                'compartida con la service account.'
+            ),
+        }), 400
+
+    try:
+        nombre_drive = nombre_archivo_sustento_vacaciones(person_dni, control_year)
+        try:
+            archivo.stream.seek(0)
+        except Exception:
+            pass
+        file_id = subir_pdf_sustento_drive(
+            folder_id, nombre_drive, archivo.stream, app_root=app.root_path
+        )
+        ok = aprobar_solicitud_vacaciones_con_sustento(
+            solicitud_id=solicitud_id,
+            company=company,
+            approval_user=current_user.id,
+            drive_file_id=file_id,
+            person=person_dni,
+        )
+        if not ok:
+            return jsonify({
+                'error': 'No se pudo aprobar la solicitud (ya fue procesada o no existe).',
+            }), 409
+        return jsonify({
+            'ok': True,
+            'message': 'Solicitud aprobada y sustento cargado.',
+            'drive_file_id': file_id,
+            'file_name': nombre_drive,
+        })
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logging.exception('aprobar_vacaciones_con_sustento')
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/perfiles-acceso')

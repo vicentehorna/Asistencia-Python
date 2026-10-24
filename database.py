@@ -3023,3 +3023,182 @@ def get_resumen_solicitud_vacaciones(company, person, control_year, dias_totales
             except Exception:
                 pass
 
+
+def extraer_drive_file_id_sustento_vacaciones(comments):
+    """Extrae file_id de Drive guardado en Comments (prefijo SUSTENTO_DRIVE:)."""
+    raw = str(comments or '').strip()
+    prefix = 'SUSTENTO_DRIVE:'
+    if raw.upper().startswith(prefix):
+        return raw[len(prefix):].strip()
+    return ''
+
+
+def _clave_solicitud_vacaciones(person, solicitud_id):
+    return f"{str(person or '').strip()}|{str(solicitud_id or '').strip()}"
+
+
+def obtener_sustento_drive_ids_por_solicitudes(company, solicitudes):
+    """
+    Mapa { 'person|id': drive_file_id } para solicitudes aprobadas con sustento.
+    solicitudes: iterable de (person, solicitud_id) o solo ids (legacy Id).
+    """
+    pares = []
+    for item in solicitudes or []:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            person = str(item[0] or '').strip()
+            try:
+                sid = int(item[1])
+            except (TypeError, ValueError):
+                continue
+            if person:
+                pares.append((person, sid))
+        else:
+            try:
+                sid = int(item)
+            except (TypeError, ValueError):
+                continue
+            pares.append(('', sid))
+    if not pares:
+        return {}
+
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        cia = str(company or '').strip()
+        out = {}
+        for person, sid in pares:
+            if pk == 'Line':
+                if not person:
+                    continue
+                cursor.execute(
+                    """
+                    SELECT Comments
+                    FROM PR_SolicitudVacaciones
+                    WHERE Company = ? AND Person = ? AND Line = ? AND status = 'A'
+                    """,
+                    (cia, person, sid),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT Person, Comments
+                    FROM PR_SolicitudVacaciones
+                    WHERE Company = ? AND Id = ? AND status = 'A'
+                    """,
+                    (cia, sid),
+                )
+            row = cursor.fetchone()
+            if not row:
+                continue
+            if pk == 'Line':
+                fid = extraer_drive_file_id_sustento_vacaciones(row[0])
+                if fid:
+                    out[_clave_solicitud_vacaciones(person, sid)] = fid
+            else:
+                person_row = str(row[0] or person or '').strip()
+                fid = extraer_drive_file_id_sustento_vacaciones(row[1] if len(row) > 1 else '')
+                if fid:
+                    out[_clave_solicitud_vacaciones(person_row, sid)] = fid
+                    out[sid] = fid
+        cursor.close()
+        conn.close()
+        return out
+    except Exception as e:
+        print(f'Error en obtener_sustento_drive_ids_por_solicitudes: {e}')
+        return {}
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def obtener_drive_file_id_sustento_vacaciones(solicitud_id, company, person=None):
+    """file_id de Drive para una solicitud aprobada con sustento, o cadena vacía."""
+    try:
+        sid = int(solicitud_id)
+    except (TypeError, ValueError):
+        return ''
+    person = str(person or '').strip()
+    m = obtener_sustento_drive_ids_por_solicitudes(company, [(person, sid)] if person else [sid])
+    if person:
+        return str(m.get(_clave_solicitud_vacaciones(person, sid)) or '').strip()
+    return str(m.get(sid) or '').strip()
+
+
+def aprobar_solicitud_vacaciones_con_sustento(solicitud_id, company, approval_user, drive_file_id, person=None):
+    """
+    Aprueba solicitud pendiente y registra el file_id de Drive en Comments (SUSTENTO_DRIVE:...).
+    Retorna True si actualizó una fila. En esquema Line requiere person.
+    """
+    conn = None
+    try:
+        sid = int(solicitud_id)
+        drive_id = str(drive_file_id or '').strip()
+        if not drive_id:
+            return False
+        comments = f'SUSTENTO_DRIVE:{drive_id}'
+        user = str(approval_user or '').strip()[:20]
+        cia = str(company or '').strip()
+        per = str(person or '').strip()
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        if pk == 'Line':
+            if not per:
+                return False
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'A',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    Comments = ?,
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Line = ?
+                  AND Company = ?
+                  AND Person = ?
+                  AND status = 'P'
+                """,
+                (user, comments[:255], user, sid, cia, per),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE PR_SolicitudVacaciones
+                SET status = 'A',
+                    ApprovalUser = ?,
+                    ApprovalDate = GETDATE(),
+                    Comments = ?,
+                    xlastuser = ?,
+                    xlastdate = CONVERT(varchar(19), GETDATE(), 120)
+                WHERE Id = ?
+                  AND Company = ?
+                  AND status = 'P'
+                """,
+                (user, comments[:255], user, sid, cia),
+            )
+        ok = cursor.rowcount > 0
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return ok
+    except Exception as e:
+        print(f'Error en aprobar_solicitud_vacaciones_con_sustento: {e}')
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+

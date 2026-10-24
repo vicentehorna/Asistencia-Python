@@ -30,6 +30,10 @@ ENDPOINT_MENU_MAP = {
     'reporte_vacaciones_detalle_post': 'detalle_vacaciones',
     'reporte_saldo_vacaciones_page': 'saldo_vacaciones',
     'reporte_saldo_vacaciones_post': 'saldo_vacaciones',
+    'reporte_aprobar_vacaciones_page': 'aprobar_vacaciones',
+    'reporte_aprobar_vacaciones_post': 'aprobar_vacaciones',
+    'aprobar_vacaciones_con_sustento': 'aprobar_vacaciones',
+    'descargar_sustento_vacaciones': 'aprobar_vacaciones',
 }
 
 # Prefijos de API / path -> menu_code (el más específico gana por longitud)
@@ -65,11 +69,15 @@ PATH_PREFIX_MENU_MAP = {
     '/reporte_vacaciones_detalle': 'detalle_vacaciones',
     '/reporte-saldo-vacaciones': 'saldo_vacaciones',
     '/reporte_saldo_vacaciones': 'saldo_vacaciones',
+    '/reporte-aprobar-vacaciones': 'aprobar_vacaciones',
+    '/reporte_aprobar_vacaciones': 'aprobar_vacaciones',
+    '/aprobar-vacaciones-con-sustento': 'aprobar_vacaciones',
+    '/sustento-vacaciones': 'aprobar_vacaciones',
 }
 
 # Catálogo de menús de Asistencia (hm_quimica también tiene menús de Planillas).
 ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values()) | frozenset({
-    'solicitud_vacaciones', 'detalle_vacaciones', 'saldo_vacaciones',
+    'solicitud_vacaciones', 'detalle_vacaciones', 'saldo_vacaciones', 'aprobar_vacaciones',
 })
 
 ALWAYS_ALLOWED_ENDPOINTS = {
@@ -196,6 +204,7 @@ def first_allowed_endpoint(session_obj) -> str:
         ('solicitud_vacaciones', 'solicitud_vacaciones_page'),
         ('detalle_vacaciones', 'reporte_vacaciones_detalle_page'),
         ('saldo_vacaciones', 'reporte_saldo_vacaciones_page'),
+        ('aprobar_vacaciones', 'reporte_aprobar_vacaciones_page'),
         ('maestro_horarios', 'maestro_horarios'),
         ('gestion_marcas', 'gestion_marcas'),
         ('reporte_resumen', 'reporte_resumen'),
