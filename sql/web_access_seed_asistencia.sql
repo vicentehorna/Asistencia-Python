@@ -22,7 +22,8 @@ USING (VALUES
     ('procesar_asistencia',   'Procesar Asistencia',       'procesos',       240, 'procesar_asistencia',     '/procesar-asistencia',     'A'),
     ('reporte_resumen',      'Resumen de Asistencia',     'reportes',       310, 'reporte_resumen',        '/reporte-resumen',        'A'),
     ('reporte_consolidado',  'Consolidado de Asistencia', 'reportes',       320, 'reporte_consolidado',    '/reporte-consolidado',    'A'),
-    ('acceso_marcador',      'Acceso al Marcador',        'seguridad',      410, 'acceso_marcador',        '/seguridad/acceso-marcador', 'A')
+    ('acceso_marcador',      'Acceso al Marcador',        'seguridad',      410, 'acceso_marcador',        '/seguridad/acceso-marcador', 'A'),
+    ('solicitud_vacaciones', 'Solicitud de Vacaciones',   'portal_trabajador', 510, 'solicitud_vacaciones_page', '/solicitud-vacaciones', 'A')
 ) AS s (MenuCode, Title, ParentCode, SortOrder, Endpoint, RoutePrefix, Status)
 ON t.MenuCode = s.MenuCode
 WHEN MATCHED THEN
@@ -58,7 +59,7 @@ WHERE m.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador'
+      'acceso_marcador','solicitud_vacaciones'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
@@ -76,7 +77,7 @@ WHERE p.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador'
+      'acceso_marcador','solicitud_vacaciones'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x

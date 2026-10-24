@@ -398,6 +398,17 @@
                 {% endif %}
 
                 <li class="py-0">
+                    <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Portal Trabajador</p>
+                </li>
+                {% if can_menu('solicitud_vacaciones') %}
+                <li class="{{ 'active' if request.endpoint == 'solicitud_vacaciones_page' else '' }}">
+                    <a href="{{ url_for('solicitud_vacaciones_page') }}" title="Solicitud de Vacaciones">
+                        <i class="bi bi-send-check"></i><span class="sidebar-link-text">Solicitud de Vacaciones</span>
+                    </a>
+                </li>
+                {% endif %}
+
+                <li class="py-0">
                     <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Seguridad</p>
                 </li>
                 {% if can_menu('acceso_marcador') %}

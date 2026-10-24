@@ -2644,3 +2644,382 @@ def eliminar_biometria_marcador(company, person, usuario):
             except Exception:
                 pass
 
+
+# --- Solicitud de Vacaciones (Portal Trabajador / PortalMinero) ---
+
+def _solicitud_vacaciones_pk_column(cursor):
+    """hm_safari usa Id (IDENTITY); hm_quimica usa Line (PK compuesta)."""
+    cursor.execute(
+        """
+        SELECT CASE
+            WHEN COL_LENGTH('dbo.PR_SolicitudVacaciones', 'Id') IS NOT NULL THEN 'Id'
+            WHEN COL_LENGTH('dbo.PR_SolicitudVacaciones', 'Line') IS NOT NULL THEN 'Line'
+            ELSE NULL
+        END
+        """
+    )
+    row = cursor.fetchone()
+    return (row[0] if row else None) or 'Id'
+
+
+def fecha_hoy_peru():
+    """Hoy en calendario Perú (America/Lima)."""
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        hoy = datetime.now(ZoneInfo('America/Lima')).date()
+    except Exception:
+        hoy = datetime.now().date()
+    return datetime(hoy.year, hoy.month, hoy.day)
+
+
+def _ultima_fila_resultset_sp(cursor):
+    """Última fila con datos entre varios result sets del SP."""
+    row = None
+    while True:
+        try:
+            if cursor.description:
+                fetched = cursor.fetchone()
+                if fetched is not None:
+                    row = fetched
+        except Exception as e:
+            if 'No results' not in str(e) or 'not a query' not in str(e):
+                raise
+        try:
+            if not cursor.nextset():
+                break
+        except Exception:
+            break
+    return row
+
+
+def get_max_dias_vacaciones(company):
+    """Tope de días por compañía (PR_mapping2.DiasVacaciones)."""
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT ISNULL(DiasVacaciones, 0) FROM PR_mapping2 WHERE company = ?",
+            (str(company or '').strip(),),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if row is not None and row[0] is not None:
+            return int(row[0])
+        return 30
+    except Exception as e:
+        print(f"Error en get_max_dias_vacaciones: {e}")
+        return 30
+
+
+def get_historial_solicitud_vacaciones(company, person, control_year=None):
+    """Lista solicitudes de vacaciones del trabajador."""
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        sql = f"""
+            SELECT
+                {pk} AS Id, Person, Company, DateBegin, DateEnd, Days, status,
+                xlastuser, xlastdate, registerdate, ApprovalDate, ApprovalUser,
+                Comments, ControlYear
+            FROM PR_SolicitudVacaciones
+            WHERE Company = ? AND Person = ?
+        """
+        params = [str(company or '').strip(), str(person or '').strip()]
+        if control_year:
+            sql += " AND ControlYear = ?"
+            params.append(str(control_year).strip())
+        sql += f" ORDER BY registerdate DESC, {pk} DESC"
+        cursor.execute(sql, tuple(params))
+        cols = [column[0] for column in cursor.description]
+        results = [dict(zip(cols, row)) for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return results
+    except Exception as e:
+        print(f"Error en get_historial_solicitud_vacaciones: {e}")
+        return []
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def solicitud_vacaciones_tiene_cruce(company, person, date_begin, date_end, exclude_id=None):
+    """True si el rango se solapa con otra solicitud P/A del mismo trabajador."""
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        sql = """
+            SELECT TOP 1 1
+            FROM PR_SolicitudVacaciones
+            WHERE Company = ?
+              AND Person = ?
+              AND status IN ('P', 'A')
+              AND DateBegin IS NOT NULL
+              AND DateEnd IS NOT NULL
+              AND CONVERT(date, DateBegin) <= CONVERT(date, ?)
+              AND CONVERT(date, DateEnd) >= CONVERT(date, ?)
+        """
+        params = [
+            str(company or '').strip(),
+            str(person or '').strip(),
+            str(date_end or '').strip(),
+            str(date_begin or '').strip(),
+        ]
+        if exclude_id is not None:
+            sql += f" AND {pk} <> ?"
+            params.append(int(exclude_id))
+        cursor.execute(sql, tuple(params))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return row is not None
+    except Exception as e:
+        print(f"Error en solicitud_vacaciones_tiene_cruce: {e}")
+        return True
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_rangos_solicitud_vacaciones(company, person):
+    """Rangos ISO existentes (P/A) para validación en cliente."""
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                CONVERT(varchar(10), DateBegin, 23),
+                CONVERT(varchar(10), DateEnd, 23)
+            FROM PR_SolicitudVacaciones
+            WHERE Company = ?
+              AND Person = ?
+              AND status IN ('P', 'A')
+              AND DateBegin IS NOT NULL
+              AND DateEnd IS NOT NULL
+            ORDER BY DateBegin
+            """,
+            (str(company or '').strip(), str(person or '').strip()),
+        )
+        rangos = []
+        for row in cursor.fetchall():
+            ini = str(row[0] or '').strip()
+            fin = str(row[1] or '').strip()
+            if ini and fin:
+                rangos.append({'begin': ini, 'end': fin})
+        cursor.close()
+        conn.close()
+        return rangos
+    except Exception as e:
+        print(f"Error en get_rangos_solicitud_vacaciones: {e}")
+        return []
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def registrar_solicitud_vacaciones(company, person, date_begin, date_end, days, comments, control_year, user_id):
+    """Inserta solicitud con estado Pendiente (P). Compatible Id / Line."""
+    if solicitud_vacaciones_tiene_cruce(company, person, date_begin, date_end):
+        return False
+    conn = None
+    try:
+        cia = str(company or '').strip()
+        per = str(person or '').strip()
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        if pk == 'Line':
+            cursor.execute(
+                """
+                SELECT ISNULL(MAX(Line), 0) + 1
+                FROM PR_SolicitudVacaciones
+                WHERE Company = ? AND Person = ?
+                """,
+                (cia, per),
+            )
+            next_line = int((cursor.fetchone() or [1])[0] or 1)
+            cursor.execute(
+                """
+                INSERT INTO PR_SolicitudVacaciones (
+                    Person, Company, Line, DateBegin, DateEnd, Days, status,
+                    xlastuser, xlastdate, registerdate, Comments, ControlYear
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CONVERT(varchar(19), GETDATE(), 120), GETDATE(), ?, ?)
+                """,
+                (
+                    per, cia, next_line, date_begin, date_end, int(days), 'P',
+                    str(user_id or '').strip()[:20],
+                    (comments or '').strip()[:255],
+                    str(control_year or '').strip()[:4],
+                ),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO PR_SolicitudVacaciones (
+                    Person, Company, DateBegin, DateEnd, Days, status,
+                    xlastuser, xlastdate, registerdate, Comments, ControlYear
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, CONVERT(varchar(19), GETDATE(), 120), GETDATE(), ?, ?)
+                """,
+                (
+                    per, cia, date_begin, date_end, int(days), 'P',
+                    str(user_id or '').strip()[:20],
+                    (comments or '').strip()[:255],
+                    str(control_year or '').strip()[:4],
+                ),
+            )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error en registrar_solicitud_vacaciones: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def eliminar_solicitud_vacaciones(company, person, solicitud_id):
+    """Elimina solicitud pendiente (solo status P)."""
+    conn = None
+    try:
+        sid = int(solicitud_id)
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        pk = _solicitud_vacaciones_pk_column(cursor)
+        cursor.execute(
+            f"""
+            DELETE FROM PR_SolicitudVacaciones
+            WHERE {pk} = ?
+              AND Company = ?
+              AND Person = ?
+              AND status = 'P'
+            """,
+            (sid, str(company or '').strip(), str(person or '').strip()),
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return deleted
+    except Exception as e:
+        print(f"Error en eliminar_solicitud_vacaciones: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def consultar_saldo_vacaciones_solicitud(company, person, control_year, fecha=None):
+    """
+    sp_pr_consultasaldovacaciones (@company, @date, @person, @controlyear).
+    """
+    cia = str(company or '').strip()
+    per = str(person or '').strip()
+    cy = str(control_year or '').strip()
+    if not cia or not per or len(cy) != 4 or not cy.isdigit():
+        return 0.0
+    fecha_consulta = fecha if fecha is not None else fecha_hoy_peru()
+    # Driver ODBC antiguo: preferir string YYYYMMDD
+    if hasattr(fecha_consulta, 'strftime'):
+        fecha_param = fecha_consulta.strftime('%Y%m%d')
+    else:
+        fecha_param = str(fecha_consulta).replace('-', '')[:8]
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_pr_consultasaldovacaciones @company=?, @date=?, @person=?, @controlyear=?',
+            (cia, fecha_param, per, cy),
+        )
+        row = _ultima_fila_resultset_sp(cursor)
+        cursor.close()
+        conn.close()
+        if not row:
+            return 0.0
+        try:
+            saldo = float(row[0] or 0)
+        except (TypeError, ValueError):
+            saldo = 0.0
+        return max(saldo, 0.0)
+    except Exception as e:
+        print(f'Error en consultar_saldo_vacaciones_solicitud: {e}')
+        return 0.0
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_resumen_solicitud_vacaciones(company, person, control_year, dias_totales=30):
+    """Días consumidos/solicitados (A+P) del ejercicio."""
+    conn = None
+    try:
+        conn = DatabaseConfig.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT ISNULL(SUM(ISNULL(Days, 0)), 0)
+            FROM PR_SolicitudVacaciones
+            WHERE Company = ?
+              AND Person = ?
+              AND ControlYear = ?
+              AND status IN ('P', 'A')
+            """,
+            (str(company or '').strip(), str(person or '').strip(), str(control_year).strip()),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        usados = int(row[0] or 0) if row else 0
+        total = int(dias_totales or 30)
+        return {"total": total, "consumidos": usados, "disponibles": max(total - usados, 0)}
+    except Exception as e:
+        print(f"Error en get_resumen_solicitud_vacaciones: {e}")
+        total = int(dias_totales or 30)
+        return {"total": total, "consumidos": 0, "disponibles": total}
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+

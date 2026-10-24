@@ -24,6 +24,8 @@ ENDPOINT_MENU_MAP = {
     'reporte_resumen': 'reporte_resumen',
     'reporte_consolidado': 'reporte_consolidado',
     'acceso_marcador': 'acceso_marcador',
+    'solicitud_vacaciones_page': 'solicitud_vacaciones',
+    'api_solicitud_vacaciones_ejercicio': 'solicitud_vacaciones',
 }
 
 # Prefijos de API / path -> menu_code (el más específico gana por longitud)
@@ -53,10 +55,12 @@ PATH_PREFIX_MENU_MAP = {
     '/reporte-consolidado': 'reporte_consolidado',
     '/api/seguridad/acceso-marcador': 'acceso_marcador',
     '/seguridad/acceso-marcador': 'acceso_marcador',
+    '/api/solicitud-vacaciones': 'solicitud_vacaciones',
+    '/solicitud-vacaciones': 'solicitud_vacaciones',
 }
 
 # Catálogo de menús de Asistencia (hm_quimica también tiene menús de Planillas).
-ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values())
+ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values()) | frozenset({'solicitud_vacaciones'})
 
 ALWAYS_ALLOWED_ENDPOINTS = {
     None,
