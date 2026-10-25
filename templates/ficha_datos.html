@@ -300,7 +300,7 @@
 document.addEventListener('DOMContentLoaded', function () {
     const ciaActual = {{ (company or '') | tojson }};
     const URL_CARRERAS = {{ url_for('api_ficha_carreras') | tojson }};
-    const URL_UBIGEO = {{ url_for('api_selectores_ubigeo') | tojson }};
+    const URL_UBIGEO = {{ url_for('api_selectores_ubigeo', _external=False) | tojson }};
 
     const cboInst = document.getElementById('costcenter1');
     const cboCarr = document.getElementById('costcenter2');
@@ -409,10 +409,19 @@ document.addEventListener('DOMContentLoaded', function () {
             const query = String(q || '').trim();
             if (query.length < 2) { cerrarLista(); return; }
             try {
-                const url = URL_UBIGEO + '?cia=' + encodeURIComponent(ciaActual) +
+                const url = '/api/ficha-datos/ubigeo?cia=' + encodeURIComponent(ciaActual || '') +
                     '&q=' + encodeURIComponent(query) + '&top=40';
-                const res = await fetch(url);
-                const data = await res.json();
+                const res = await fetch(url, {
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                });
+                const data = await res.json().catch(function () { return null; });
+                if (!res.ok) {
+                    const msg = (data && data.error) ? data.error : ('Error ' + res.status);
+                    lista.innerHTML = '<div class="list-group-item text-danger">' + escHtml(msg) + '</div>';
+                    lista.classList.remove('d-none');
+                    return;
+                }
                 renderLista(Array.isArray(data) ? data : []);
             } catch (err) {
                 lista.innerHTML = '<div class="list-group-item text-danger">Error al buscar ubigeo</div>';

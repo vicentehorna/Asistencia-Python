@@ -4011,17 +4011,52 @@ def api_companias():
                 pass
 
 
+def _ubigeo_items_from_rows(rows):
+    items = []
+    for r in rows or []:
+        item_id = str(
+            r.get('id') or r.get('localite') or r.get('col0') or ''
+        ).strip()
+        if not item_id and len(r) == 1:
+            item_id = str(next(iter(r.values()), '') or '').strip()
+        if not item_id:
+            continue
+        items.append({
+            'id': item_id,
+            'text': str(r.get('text') or item_id).strip(),
+            'distrito': _jsonable_value(r.get('distrito')),
+            'provincia': _jsonable_value(r.get('provincia')),
+            'departamento': _jsonable_value(r.get('departamento')),
+            'ubigeo': _jsonable_value(r.get('ubigeo')),
+        })
+    return items
+
+
+def _buscar_ubigeo_cursor(cursor, cia, busqueda, top):
+    cursor.execute(
+        "EXEC sp_pr_selectorubigeo_web @cia=?, @busqueda=?, @top=?",
+        (cia or None, busqueda, top),
+    )
+    return _ubigeo_items_from_rows(_dicts_first_nonempty_resultset(cursor))
+
+
 @app.route('/api/selectores/ubigeo')
+@app.route('/api/ficha-datos/ubigeo')
 @login_required
 def api_selectores_ubigeo():
     """sp_pr_selectorubigeo_web → distritos Perú (departamento / provincia / distrito)."""
     ensure_user_session()
-    cia = str(
+    cia_raw = str(
         request.args.get('cia')
         or request.args.get('company')
         or _reporte_compania_usuario_logueado()
         or ''
     ).strip()
+    # Softland a veces mezcla ReplicationUnit (LIMABGT) con Company (BGT).
+    # Si parece un Localite/código largo, no filtrar por él.
+    cia = cia_raw[:4] if cia_raw and ' ' not in cia_raw and len(cia_raw) <= 10 else ''
+    if cia_raw.upper().startswith('LIMA') and cia_raw.upper() != 'BGT':
+        cia = 'BGT'
     busqueda = str(request.args.get('q') or request.args.get('busqueda') or '').strip()
     try:
         top = int(request.args.get('top') or 40)
@@ -4032,27 +4067,15 @@ def api_selectores_ubigeo():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "EXEC sp_pr_selectorubigeo_web @cia=?, @busqueda=?, @top=?",
-            (cia or None, busqueda, top),
-        )
-        rows = _dicts_first_nonempty_resultset(cursor)
-        items = []
-        for r in rows:
-            item_id = str(r.get('id') or '').strip()
-            if not item_id:
-                continue
-            items.append({
-                'id': item_id,
-                'text': str(r.get('text') or item_id).strip(),
-                'distrito': _jsonable_value(r.get('distrito')),
-                'provincia': _jsonable_value(r.get('provincia')),
-                'departamento': _jsonable_value(r.get('departamento')),
-                'ubigeo': _jsonable_value(r.get('ubigeo')),
-            })
+        items = _buscar_ubigeo_cursor(cursor, cia or None, busqueda, top)
+        # Fallback: catálogo compartido (BGT / sin filtro) si la cia no tiene data
+        if not items and cia:
+            items = _buscar_ubigeo_cursor(cursor, 'BGT', busqueda, top)
+        if not items and cia:
+            items = _buscar_ubigeo_cursor(cursor, None, busqueda, top)
         return jsonify(items)
     except Exception:
-        logging.exception('api_selectores_ubigeo')
+        logging.exception('api_selectores_ubigeo cia=%s q=%s', cia_raw, busqueda)
         return jsonify([])
     finally:
         if conn:
