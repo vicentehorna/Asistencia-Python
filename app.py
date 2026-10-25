@@ -3199,6 +3199,7 @@ def ficha_datos_page():
     return render_template(
         'ficha_datos.html',
         nombre_persona=_nombre_persona_sesion(person) if person else (contacto.get('name') or ''),
+        company=company or '',
         contacto=contacto,
         educacion=educacion,
         hist_contacto=hist_contacto,
@@ -4001,6 +4002,57 @@ def api_companias():
         return jsonify(data)
     except Exception:
         logging.exception("api_companias")
+        return jsonify([])
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/selectores/ubigeo')
+@login_required
+def api_selectores_ubigeo():
+    """sp_pr_selectorubigeo_web → distritos Perú (departamento / provincia / distrito)."""
+    ensure_user_session()
+    cia = str(
+        request.args.get('cia')
+        or request.args.get('company')
+        or _reporte_compania_usuario_logueado()
+        or ''
+    ).strip()
+    busqueda = str(request.args.get('q') or request.args.get('busqueda') or '').strip()
+    try:
+        top = int(request.args.get('top') or 40)
+    except (TypeError, ValueError):
+        top = 40
+    top = max(1, min(top, 100))
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC sp_pr_selectorubigeo_web @cia=?, @busqueda=?, @top=?",
+            (cia or None, busqueda, top),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        items = []
+        for r in rows:
+            item_id = str(r.get('id') or '').strip()
+            if not item_id:
+                continue
+            items.append({
+                'id': item_id,
+                'text': str(r.get('text') or item_id).strip(),
+                'distrito': _jsonable_value(r.get('distrito')),
+                'provincia': _jsonable_value(r.get('provincia')),
+                'departamento': _jsonable_value(r.get('departamento')),
+                'ubigeo': _jsonable_value(r.get('ubigeo')),
+            })
+        return jsonify(items)
+    except Exception:
+        logging.exception('api_selectores_ubigeo')
         return jsonify([])
     finally:
         if conn:

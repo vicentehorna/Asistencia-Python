@@ -53,6 +53,10 @@ def obtener_datos_contacto_actuales(company, person):
             'address': str(d.get('address') or '').strip(),
             'localite': str(d.get('localite') or '').strip(),
             'ubigeo_texto': str(d.get('ubigeo_texto') or '').strip(),
+            'ubigeo': str(d.get('ubigeo') or '').strip(),
+            'departamento': str(d.get('departamento') or '').strip(),
+            'provincia': str(d.get('provincia') or '').strip(),
+            'distrito': str(d.get('distrito') or '').strip(),
             'name': str(d.get('name') or d.get('nombre') or '').strip(),
         }
     except Exception as e:
