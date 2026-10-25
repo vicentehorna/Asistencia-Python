@@ -27,6 +27,7 @@ USING (VALUES
     ('solicitud_papeletas',  'Solicitud de Papeletas',    'portal_trabajador', 515, 'solicitud_papeletas_page', '/solicitud-papeletas', 'A'),
     ('banco_horas',          'Banco de Horas',            'portal_trabajador', 518, 'banco_horas_page', '/banco-horas', 'A'),
     ('teletrabajo',          'Teletrabajo',               'portal_trabajador', 519, 'teletrabajo_page', '/teletrabajo', 'A'),
+    ('consulta_asistencia',  'Consulta de Asistencia',    'portal_trabajador', 525, 'consulta_asistencia_page', '/consulta-asistencia', 'A'),
     ('detalle_vacaciones',   'Detalle de Vacaciones',     'portal_trabajador', 520, 'reporte_vacaciones_detalle_page', '/reporte-vacaciones-detalle', 'A'),
     ('saldo_vacaciones',     'Saldo de Vacaciones',       'portal_trabajador', 530, 'reporte_saldo_vacaciones_page', '/reporte-saldo-vacaciones', 'A'),
     ('aprobar_vacaciones',   'Aprobar Vacaciones',        'aprobaciones',      610, 'reporte_aprobar_vacaciones_page', '/reporte-aprobar-vacaciones', 'A'),
@@ -69,7 +70,7 @@ WHERE m.Status = 'A'
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
       'acceso_marcador','solicitud_vacaciones','solicitud_papeletas','banco_horas','teletrabajo',
-      'detalle_vacaciones','saldo_vacaciones',
+      'consulta_asistencia','detalle_vacaciones','saldo_vacaciones',
       'aprobar_vacaciones','aprobar_papeletas','aprobar_compensaciones','aprobar_teletrabajo'
   )
   AND NOT EXISTS (
@@ -90,7 +91,7 @@ WHERE p.Status = 'A'
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
       'acceso_marcador','solicitud_vacaciones','solicitud_papeletas','banco_horas','teletrabajo',
-      'detalle_vacaciones','saldo_vacaciones',
+      'consulta_asistencia','detalle_vacaciones','saldo_vacaciones',
       'aprobar_vacaciones','aprobar_papeletas','aprobar_compensaciones','aprobar_teletrabajo'
   )
   AND NOT EXISTS (
@@ -103,7 +104,10 @@ INSERT INTO dbo.WEB_AccessProfileMenu (ProfileCode, MenuCode)
 SELECT 'SIMPLE', m.MenuCode
 FROM dbo.WEB_MenuOption m
 WHERE m.Status = 'A'
-  AND m.MenuCode IN ('solicitud_vacaciones', 'solicitud_papeletas', 'banco_horas', 'teletrabajo', 'detalle_vacaciones', 'saldo_vacaciones')
+  AND m.MenuCode IN (
+      'solicitud_vacaciones', 'solicitud_papeletas', 'banco_horas', 'teletrabajo',
+      'consulta_asistencia', 'detalle_vacaciones', 'saldo_vacaciones'
+  )
   AND EXISTS (SELECT 1 FROM dbo.WEB_AccessProfile WHERE ProfileCode = 'SIMPLE')
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x

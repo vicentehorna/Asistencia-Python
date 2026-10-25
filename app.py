@@ -4,6 +4,7 @@ import os
 import re
 import smtplib
 import sys
+from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from email.mime.multipart import MIMEMultipart
@@ -449,6 +450,76 @@ def _en_desarrollo(titulo):
 def reporte_resumen():
     ensure_user_session()
     return render_template('reporte_resumen.html')
+
+
+@app.route('/consulta-asistencia')
+@login_required
+def consulta_asistencia_page():
+    """Portal Trabajador: resumen de asistencia solo del usuario logueado."""
+    ensure_user_session()
+    company, person = _vacaciones_company_person_solicitud()
+    hoy = fecha_hoy_peru().date()
+    fecha_ini = hoy.replace(day=1).strftime('%Y-%m-%d')
+    fecha_fin = hoy.replace(day=monthrange(hoy.year, hoy.month)[1]).strftime('%Y-%m-%d')
+    if not person:
+        flash(
+            'Su usuario no tiene un trabajador asociado. '
+            'La consulta de asistencia requiere Person en sesión.',
+            'warning',
+        )
+    return render_template(
+        'consulta_asistencia.html',
+        fecha_ini=fecha_ini,
+        fecha_fin=fecha_fin,
+        nombre_persona=_nombre_persona_sesion(person) if person else '',
+    )
+
+
+@app.route('/api/portal/consulta-asistencia', methods=['POST'])
+@login_required
+def api_consulta_asistencia():
+    """Misma SP que resumen, pero fuerza cia/person de la sesión (perfil SIMPLE)."""
+    ensure_user_session()
+    company, person = _vacaciones_company_person_solicitud()
+    body = request.get_json(silent=True) or {}
+    fechaini = str(body.get('fechaini') or '').strip()
+    fechafin = str(body.get('fechafin') or '').strip()
+
+    if not company or not person:
+        return jsonify({
+            'error': 'No se pudo identificar su trabajador. Vuelva a iniciar sesión.',
+        }), 400
+    if not fechaini or not fechafin:
+        return jsonify({'error': 'Debe indicar fecha inicio y fecha fin.'}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_ca_ReporteResumenAsistencia_web @cia=?, @fechaini=?, @fechafin=?, @person=?',
+            (company, fechaini, fechafin, person),
+        )
+        columns, rows = _fetch_first_nonempty_resultset(cursor)
+        if not rows:
+            return jsonify([])
+        data = []
+        for row in rows:
+            item = {}
+            for col, val in zip(columns, row):
+                key = str(col).strip().lower()
+                item[key] = _jsonable_value(val)
+            data.append(item)
+        return jsonify(data)
+    except Exception as e:
+        logging.exception('api_consulta_asistencia')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @app.route('/reporte-consolidado')

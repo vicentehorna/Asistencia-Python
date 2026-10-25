@@ -481,6 +481,13 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if can_menu('consulta_asistencia') %}
+                <li class="{{ 'active' if request.endpoint == 'consulta_asistencia_page' else '' }}">
+                    <a href="{{ url_for('consulta_asistencia_page') }}" title="Consulta de Asistencia">
+                        <i class="bi bi-calendar2-week"></i><span class="sidebar-link-text">Consulta de Asistencia</span>
+                    </a>
+                </li>
+                {% endif %}
                 {% if can_menu('detalle_vacaciones') %}
                 <li class="{{ 'active' if request.endpoint == 'reporte_vacaciones_detalle_page' else '' }}">
                     <a href="{{ url_for('reporte_vacaciones_detalle_page') }}" title="Detalle de Vacaciones">

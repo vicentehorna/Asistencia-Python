@@ -1,0 +1,343 @@
+{% extends "layout.html" %}
+
+{% block title %}Consulta de Asistencia{% endblock %}
+
+{% block extra_css %}
+<style>
+    .table-scroll-container {
+        max-height: 65vh;
+        overflow: auto;
+        border: 1px solid #dee2e6;
+    }
+
+    .table-planilla-vertical {
+        --sticky-col1-w: 5.75rem;
+        font-size: 11px;
+        white-space: nowrap;
+        margin-bottom: 0;
+    }
+
+    .table-planilla-vertical th,
+    .table-planilla-vertical td {
+        padding: 0.2rem 0.4rem;
+        vertical-align: middle;
+    }
+
+    .table-planilla-vertical thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f8f9fa;
+        z-index: 2;
+        box-shadow: 0 1px 0 #dee2e6;
+        font-weight: 600;
+    }
+
+    .table-planilla-vertical .sticky-col-1 {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        background-color: #fff;
+        min-width: var(--sticky-col1-w);
+        width: var(--sticky-col1-w);
+        max-width: var(--sticky-col1-w);
+        box-sizing: border-box;
+    }
+
+    .table-planilla-vertical .sticky-col-2 {
+        position: sticky;
+        left: var(--sticky-col1-w);
+        z-index: 1;
+        background-color: #fff;
+        min-width: 13rem;
+        max-width: 14rem;
+        box-sizing: border-box;
+    }
+
+    .table-planilla-vertical thead th.sticky-col-1,
+    .table-planilla-vertical thead th.sticky-col-2 {
+        z-index: 3;
+        background-color: #f8f9fa;
+    }
+
+    .table-planilla-vertical tbody tr.fila-falta td {
+        background-color: #fff3cd;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h4 class="mb-0 fw-bold text-secondary">
+        <i class="bi bi-calendar2-week me-2"></i>Consulta de Asistencia
+    </h4>
+    {% if nombre_persona %}
+    <div class="small text-muted">Trabajador: <strong>{{ nombre_persona }}</strong></div>
+    {% endif %}
+</div>
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body pt-3">
+        <form id="frmConsultaAsistencia" class="row g-3">
+            <div class="col-md-3">
+                <label for="txtFechaIni" class="form-label small fw-bold text-muted">Fecha Inicio</label>
+                <input type="date" id="txtFechaIni" class="form-control form-control-sm"
+                       value="{{ fecha_ini }}" required>
+            </div>
+            <div class="col-md-3">
+                <label for="txtFechaFin" class="form-label small fw-bold text-muted">Fecha Fin</label>
+                <input type="date" id="txtFechaFin" class="form-control form-control-sm"
+                       value="{{ fecha_fin }}" required>
+            </div>
+            <div class="col-12 border-top pt-3 mt-3">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm px-4">
+                        <i class="bi bi-search"></i> Consultar
+                    </button>
+                    <button type="button" class="btn btn-success btn-sm px-4" id="btnExportExcel" disabled>
+                        <i class="bi bi-file-earmark-excel"></i> Exportar a Excel
+                    </button>
+                    <span class="ms-auto text-muted small fw-bold">
+                        No. de registros: <span id="lblRowCount">0</span>
+                    </span>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 d-none" id="cardResultado">
+    <div class="card-body">
+        <h4 class="text-center fw-bold mb-3">Mi resumen de asistencia</h4>
+        <div class="table-scroll-container">
+            <table class="table table-bordered table-sm table-hover table-planilla-vertical align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="sticky-col-1 text-center">Persona</th>
+                        <th class="sticky-col-2">Nombre</th>
+                        <th class="text-center">Fecha</th>
+                        <th class="text-center">Día</th>
+                        <th>Horario</th>
+                        <th class="text-center">Entrada</th>
+                        <th class="text-center">S. ref.</th>
+                        <th class="text-center">E. ref.</th>
+                        <th class="text-center">Salida</th>
+                        <th class="text-center">Falta</th>
+                        <th class="text-center">Tardanza</th>
+                        <th class="text-end">M. tarde</th>
+                        <th>Motivo</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody-consulta-asistencia"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const txtFechaIni = document.getElementById('txtFechaIni');
+    const txtFechaFin = document.getElementById('txtFechaFin');
+    const frm = document.getElementById('frmConsultaAsistencia');
+    const btnExportExcel = document.getElementById('btnExportExcel');
+    const tbody = document.getElementById('tbody-consulta-asistencia');
+    const cardResultado = document.getElementById('cardResultado');
+    const lblRowCount = document.getElementById('lblRowCount');
+    const NOMBRE = {{ (nombre_persona or '')|tojson }};
+    let lastExport = null;
+
+    const escapeHtml = (s) => String(s || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const normalizeValue = (v) => (v == null ? '' : String(v).trim());
+    const formatHoraHHMM = (v) => {
+        const s = normalizeValue(v);
+        if (!s) return '';
+        const m = s.match(/(\d{1,2}):(\d{2})/);
+        if (!m) return s;
+        return `${m[1].padStart(2, '0')}:${m[2]}`;
+    };
+    const esFalta = (v) => normalizeValue(v).toLowerCase() === 'si';
+    const pickTardanza = (row) => {
+        const directo = normalizeValue(row.tardanza != null ? row.tardanza : row.Tardanza);
+        if (directo) return directo;
+        const min = parseInt(normalizeValue(row.minutostarde), 10);
+        return !isNaN(min) && min > 0 ? 'Si' : 'No';
+    };
+
+    function setRowCount(n) {
+        if (lblRowCount) lblRowCount.textContent = String(Math.max(0, parseInt(n, 10) || 0));
+    }
+
+    function renderRows(data) {
+        tbody.innerHTML = '';
+        data.forEach((row) => {
+            const tr = document.createElement('tr');
+            if (esFalta(row.falta)) tr.classList.add('fila-falta');
+            tr.innerHTML = `
+                <td class="sticky-col-1 font-monospace fw-bold text-center">${escapeHtml(normalizeValue(row.person))}</td>
+                <td class="sticky-col-2 text-truncate">${escapeHtml(normalizeValue(row.name))}</td>
+                <td class="text-center">${escapeHtml(normalizeValue(row.fecha))}</td>
+                <td class="text-center">${escapeHtml(normalizeValue(row.diasem))}</td>
+                <td>${escapeHtml(normalizeValue(row.nombrehorario))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.entrada))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.salidarefri))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.entradarefri))}</td>
+                <td class="text-center">${escapeHtml(formatHoraHHMM(row.salida))}</td>
+                <td class="text-center">${escapeHtml(normalizeValue(row.falta))}</td>
+                <td class="text-center">${escapeHtml(pickTardanza(row))}</td>
+                <td class="text-end">${escapeHtml(normalizeValue(row.minutostarde))}</td>
+                <td>${escapeHtml(normalizeValue(row.motivo))}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    async function exportExcel(data, meta) {
+        if (typeof ExcelJS === 'undefined') {
+            alert('No se pudo cargar ExcelJS. Recargue la página.');
+            return;
+        }
+        const header = ['PERSONA', 'NOMBRE', 'FECHA', 'DÍA', 'HORARIO', 'ENTRADA', 'SALIDA REFRI', 'ENTRADA REFRI', 'SALIDA', 'FALTA', 'TARDANZA', 'MIN. TARDE', 'MOTIVO'];
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Mi Asistencia');
+        const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+        const borderThin = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+        const allBorders = { top: borderThin, left: borderThin, bottom: borderThin, right: borderThin };
+
+        ws.mergeCells(1, 1, 1, header.length);
+        const t = ws.getCell(1, 1);
+        t.value = 'CONSULTA DE ASISTENCIA (PORTAL TRABAJADOR)';
+        t.font = { bold: true, size: 14 };
+        t.alignment = { horizontal: 'center', vertical: 'middle' };
+        t.fill = fill('FFE9ECEF');
+        ws.getRow(1).height = 26;
+
+        const metaRow = ws.addRow([
+            'Trabajador', meta.trabajador || '',
+            'F. Inicio', meta.fechaini || '',
+            'F. Fin', meta.fechafin || '',
+        ]);
+        metaRow.eachCell((cell, colNumber) => {
+            cell.fill = fill('FFF8F9FA');
+            cell.font = { bold: colNumber % 2 === 1 };
+            cell.border = allBorders;
+        });
+        ws.addRow([]);
+
+        const h = ws.addRow(header);
+        h.font = { bold: true };
+        h.eachCell((cell) => {
+            cell.fill = fill('FFF8F9FA');
+            cell.border = allBorders;
+            cell.alignment = { horizontal: 'center' };
+        });
+
+        data.forEach((row) => {
+            const falta = normalizeValue(row.falta);
+            const r = ws.addRow([
+                normalizeValue(row.person),
+                normalizeValue(row.name),
+                normalizeValue(row.fecha),
+                normalizeValue(row.diasem),
+                normalizeValue(row.nombrehorario),
+                formatHoraHHMM(row.entrada),
+                formatHoraHHMM(row.salidarefri),
+                formatHoraHHMM(row.entradarefri),
+                formatHoraHHMM(row.salida),
+                falta,
+                pickTardanza(row),
+                normalizeValue(row.minutostarde),
+                normalizeValue(row.motivo),
+            ]);
+            const isFalta = esFalta(falta);
+            r.eachCell((cell) => {
+                cell.border = allBorders;
+                cell.fill = fill(isFalta ? 'FFFFF3CD' : 'FFFFFFFF');
+            });
+        });
+
+        [11, 26, 11, 9, 16, 10, 12, 12, 10, 8, 10, 10, 28].forEach((w, i) => {
+            ws.getColumn(i + 1).width = w;
+        });
+
+        const buffer = await wb.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `consulta_asistencia_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }
+
+    frm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const fechaini = txtFechaIni.value;
+        const fechafin = txtFechaFin.value;
+        if (!fechaini || !fechafin) {
+            alert('Debe indicar el rango de fechas.');
+            return;
+        }
+        if (fechaini > fechafin) {
+            alert('La fecha inicio no puede ser mayor que la fecha fin.');
+            return;
+        }
+        try {
+            const res = await fetch({{ url_for('api_consulta_asistencia') | tojson }}, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ fechaini, fechafin }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                cardResultado.classList.add('d-none');
+                setRowCount(0);
+                lastExport = null;
+                btnExportExcel.disabled = true;
+                alert(data.error || 'Error al consultar.');
+                return;
+            }
+            if (!Array.isArray(data) || data.length === 0) {
+                tbody.innerHTML = '';
+                cardResultado.classList.add('d-none');
+                setRowCount(0);
+                lastExport = null;
+                btnExportExcel.disabled = true;
+                alert('No se encontraron registros para el rango seleccionado.');
+                return;
+            }
+            renderRows(data);
+            setRowCount(data.length);
+            cardResultado.classList.remove('d-none');
+            lastExport = { data, meta: { trabajador: NOMBRE || 'Yo', fechaini, fechafin } };
+            btnExportExcel.disabled = false;
+        } catch (err) {
+            console.error(err);
+            cardResultado.classList.add('d-none');
+            setRowCount(0);
+            lastExport = null;
+            btnExportExcel.disabled = true;
+            alert('Error de red o del servidor.');
+        }
+    });
+
+    btnExportExcel.addEventListener('click', async function () {
+        if (!lastExport || !lastExport.data || !lastExport.data.length) {
+            alert('Ejecute primero una búsqueda con resultados.');
+            return;
+        }
+        try {
+            await exportExcel(lastExport.data, lastExport.meta);
+        } catch (err) {
+            console.error(err);
+            alert('No se pudo generar el Excel.');
+        }
+    });
+});
+</script>
+{% endblock %}

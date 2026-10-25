@@ -24,6 +24,8 @@ ENDPOINT_MENU_MAP = {
     'reporte_resumen': 'reporte_resumen',
     'reporte_consolidado': 'reporte_consolidado',
     'acceso_marcador': 'acceso_marcador',
+    'consulta_asistencia_page': 'consulta_asistencia',
+    'api_consulta_asistencia': 'consulta_asistencia',
     'solicitud_vacaciones_page': 'solicitud_vacaciones',
     'api_solicitud_vacaciones_ejercicio': 'solicitud_vacaciones',
     'reporte_vacaciones_detalle_page': 'detalle_vacaciones',
@@ -81,6 +83,8 @@ PATH_PREFIX_MENU_MAP = {
     '/reporte-consolidado': 'reporte_consolidado',
     '/api/seguridad/acceso-marcador': 'acceso_marcador',
     '/seguridad/acceso-marcador': 'acceso_marcador',
+    '/api/portal/consulta-asistencia': 'consulta_asistencia',
+    '/consulta-asistencia': 'consulta_asistencia',
     '/api/solicitud-vacaciones': 'solicitud_vacaciones',
     '/solicitud-vacaciones': 'solicitud_vacaciones',
     '/reporte-vacaciones-detalle': 'detalle_vacaciones',
@@ -117,6 +121,7 @@ ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values()) | frozenset({
     'solicitud_papeletas', 'aprobar_papeletas',
     'banco_horas', 'aprobar_compensaciones',
     'teletrabajo', 'aprobar_teletrabajo',
+    'consulta_asistencia',
 })
 
 ALWAYS_ALLOWED_ENDPOINTS = {
@@ -244,6 +249,7 @@ def first_allowed_endpoint(session_obj) -> str:
         ('solicitud_papeletas', 'solicitud_papeletas_page'),
         ('banco_horas', 'banco_horas_page'),
         ('teletrabajo', 'teletrabajo_page'),
+        ('consulta_asistencia', 'consulta_asistencia_page'),
         ('detalle_vacaciones', 'reporte_vacaciones_detalle_page'),
         ('saldo_vacaciones', 'reporte_saldo_vacaciones_page'),
         ('aprobar_vacaciones', 'reporte_aprobar_vacaciones_page'),
