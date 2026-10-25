@@ -47,6 +47,11 @@ ENDPOINT_MENU_MAP = {
     'aprobar_compensaciones_lista': 'aprobar_compensaciones',
     'aprobar_compensaciones_nivel': 'aprobar_compensaciones',
     'rechazar_compensaciones_nivel': 'aprobar_compensaciones',
+    'teletrabajo_page': 'teletrabajo',
+    'aprobar_teletrabajo_page': 'aprobar_teletrabajo',
+    'aprobar_teletrabajo_lista': 'aprobar_teletrabajo',
+    'aprobar_teletrabajo_nivel': 'aprobar_teletrabajo',
+    'rechazar_teletrabajo_nivel': 'aprobar_teletrabajo',
 }
 
 # Prefijos de API / path -> menu_code (el más específico gana por longitud)
@@ -99,6 +104,11 @@ PATH_PREFIX_MENU_MAP = {
     '/aprobar-compensaciones-nivel': 'aprobar_compensaciones',
     '/rechazar-compensaciones-nivel': 'aprobar_compensaciones',
     '/aprobar-compensaciones': 'aprobar_compensaciones',
+    '/teletrabajo': 'teletrabajo',
+    '/aprobar-teletrabajo-lista': 'aprobar_teletrabajo',
+    '/aprobar-teletrabajo-nivel': 'aprobar_teletrabajo',
+    '/rechazar-teletrabajo-nivel': 'aprobar_teletrabajo',
+    '/aprobar-teletrabajo': 'aprobar_teletrabajo',
 }
 
 # Catálogo de menús de Asistencia (hm_quimica también tiene menús de Planillas).
@@ -106,6 +116,7 @@ ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values()) | frozenset({
     'solicitud_vacaciones', 'detalle_vacaciones', 'saldo_vacaciones', 'aprobar_vacaciones',
     'solicitud_papeletas', 'aprobar_papeletas',
     'banco_horas', 'aprobar_compensaciones',
+    'teletrabajo', 'aprobar_teletrabajo',
 })
 
 ALWAYS_ALLOWED_ENDPOINTS = {
@@ -232,11 +243,13 @@ def first_allowed_endpoint(session_obj) -> str:
         ('solicitud_vacaciones', 'solicitud_vacaciones_page'),
         ('solicitud_papeletas', 'solicitud_papeletas_page'),
         ('banco_horas', 'banco_horas_page'),
+        ('teletrabajo', 'teletrabajo_page'),
         ('detalle_vacaciones', 'reporte_vacaciones_detalle_page'),
         ('saldo_vacaciones', 'reporte_saldo_vacaciones_page'),
         ('aprobar_vacaciones', 'reporte_aprobar_vacaciones_page'),
         ('aprobar_papeletas', 'aprobar_papeletas_page'),
         ('aprobar_compensaciones', 'aprobar_compensaciones_page'),
+        ('aprobar_teletrabajo', 'aprobar_teletrabajo_page'),
         ('maestro_horarios', 'maestro_horarios'),
         ('gestion_marcas', 'gestion_marcas'),
         ('reporte_resumen', 'reporte_resumen'),

@@ -1,0 +1,273 @@
+{% extends "layout.html" %}
+
+{% block title %}Teletrabajo{% endblock %}
+
+{% block extra_css %}
+<style>
+    .tt-day { min-height: 4.5rem; border-radius: .75rem; border: 1px solid #e2e8f0; padding: .5rem; }
+    .tt-day.remoto { background: #ecfdf5; border-color: #86efac; }
+    .tt-day.presencial { background: #f1f5f9; border-color: #cbd5e1; }
+    .tt-day.empty { background: transparent; border-style: dashed; opacity: .4; }
+    .tt-dow { font-size: .7rem; text-transform: uppercase; color: #64748b; font-weight: 700; }
+    .form-label-compact { font-size: 0.78rem; font-weight: 700; color: #64748b; margin-bottom: 0.35rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h4 class="mb-1 fw-bold text-secondary">
+            <i class="bi bi-house-door me-2"></i>Teletrabajo (Ley 31572)
+        </h4>
+        <div class="small text-muted">
+            Colaborador: <strong>{{ nombre_persona or '—' }}</strong>
+            · Modalidad: <strong>{{ acuerdo.ModalidadLabel if acuerdo else '—' }}</strong>
+        </div>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab != 'matriz' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tabProg" type="button">
+            Programación de turnos
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if tab == 'matriz' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tabMatriz" type="button">
+            Matriz de entregables
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    {# ===== TAB 1 ===== #}
+    <div class="tab-pane fade {% if tab != 'matriz' %}show active{% endif %}" id="tabProg">
+        <div class="row g-3">
+            <div class="col-12 col-lg-4">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Solicitar rol del mes</h5>
+                    </div>
+                    <div class="card-body pt-2">
+                        <form method="post">
+                            <input type="hidden" name="action" value="solicitar_rol">
+                            <div class="mb-2">
+                                <label class="form-label-compact" for="periodo">Periodo</label>
+                                <input type="month" class="form-control form-control-sm" id="periodo" name="periodo"
+                                       value="{{ periodo }}" required>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label-compact d-block">Días remotos (semana)</label>
+                                {% for n, label in dias_semana_opts %}
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" name="dias_remotos" value="{{ n }}" id="d{{ n }}"
+                                           {% if n in (2, 4) %}checked{% endif %}>
+                                    <label class="form-check-label small" for="d{{ n }}">{{ label }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label-compact" for="motivo_rol">Motivo / observación</label>
+                                <textarea class="form-control form-control-sm" id="motivo_rol" name="motivo" rows="2" maxlength="500"></textarea>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-sm fw-semibold">
+                                    <i class="bi bi-send me-1"></i>Enviar a aprobación
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card border-0 shadow-sm mt-3">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h6 class="mb-0 fw-bold text-secondary">Solicitudes de rol</h6>
+                    </div>
+                    <div class="card-body pt-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr><th>Periodo</th><th>Remotos</th><th>Estado</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for r in historial_roles %}
+                                    <tr>
+                                        <td>{{ r.periodo }}</td>
+                                        <td class="small">{{ r.dias_label }}</td>
+                                        <td><span class="badge text-bg-{{ r.flujo_chip }}">{{ r.flujo_label }}</span></td>
+                                        <td class="text-end">
+                                            {% if r.can_delete %}
+                                            <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar?');">
+                                                <input type="hidden" name="action" value="delete_rol">
+                                                <input type="hidden" name="solicitud_id" value="{{ r.id }}">
+                                                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr><td colspan="4" class="text-muted text-center py-3">Sin solicitudes.</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-8">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <h5 class="mb-0 fw-bold text-secondary">Calendario {{ periodo_label }}</h5>
+                        <form method="get" class="d-flex gap-2 align-items-center">
+                            <input type="hidden" name="tab" value="prog">
+                            <input type="month" class="form-control form-control-sm" name="periodo" value="{{ periodo }}" onchange="this.form.submit()">
+                        </form>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2 mb-2">
+                            {% for d in ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'] %}
+                            <div class="col text-center tt-dow">{{ d }}</div>
+                            {% endfor %}
+                        </div>
+                        {% for week in semanas %}
+                        <div class="row g-2 mb-2">
+                            {% for cell in week %}
+                            <div class="col">
+                                {% if cell %}
+                                <div class="tt-day {% if cell.modalidad == 'R' %}remoto{% elif cell.modalidad == 'P' %}presencial{% else %}empty{% endif %}">
+                                    <div class="fw-bold small">{{ cell.dia }}</div>
+                                    {% if cell.modalidad == 'R' %}
+                                    <div class="small text-success"><i class="bi bi-house-door"></i> Remoto</div>
+                                    {% elif cell.modalidad == 'P' %}
+                                    <div class="small text-secondary"><i class="bi bi-building"></i> Presen.</div>
+                                    {% endif %}
+                                </div>
+                                {% else %}
+                                <div class="tt-day empty"></div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endfor %}
+                        <div class="small text-muted mt-2">
+                            Los días remotos/presenciales se actualizan al aprobar el rol del mes (Jefe → RR.HH.).
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ===== TAB 2 ===== #}
+    <div class="tab-pane fade {% if tab == 'matriz' %}show active{% endif %}" id="tabMatriz">
+        <div class="row g-3">
+            <div class="col-12 col-lg-4">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Nueva actividad</h5>
+                    </div>
+                    <div class="card-body pt-2">
+                        <form method="post">
+                            <input type="hidden" name="action" value="matriz_nueva">
+                            <input type="hidden" name="tab" value="matriz">
+                            <div class="mb-2">
+                                <label class="form-label-compact" for="m_periodo">Periodo</label>
+                                <input type="month" class="form-control form-control-sm" id="m_periodo" name="periodo" value="{{ periodo }}" required>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label-compact" for="actividad">Actividad / tarea</label>
+                                <textarea class="form-control form-control-sm" id="actividad" name="actividad" rows="2" maxlength="500" required></textarea>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label-compact" for="entregable">Entregable esperado</label>
+                                <input type="text" class="form-control form-control-sm" id="entregable" name="entregable" maxlength="300" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label-compact" for="fecha_limite">Fecha límite</label>
+                                <input type="date" class="form-control form-control-sm" id="fecha_limite" name="fecha_limite" required>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-sm fw-semibold">
+                                    <i class="bi bi-plus-lg me-1"></i>Registrar actividad
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-8">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Matriz de cumplimiento · {{ periodo }}</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Actividad / Entregable</th>
+                                        <th>Fecha límite</th>
+                                        <th style="min-width:8rem">Avance</th>
+                                        <th>Estado</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for a in matriz %}
+                                    <tr>
+                                        <td>
+                                            <div class="fw-semibold">{{ a.actividad }}</div>
+                                            <div class="small text-muted">{{ a.entregable }}</div>
+                                            {% if a.comentario_jefe %}
+                                            <div class="small text-info mt-1"><i class="bi bi-chat-left-text"></i> {{ a.comentario_jefe }}</div>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ a.fecha_limite_txt }}</td>
+                                        <td>
+                                            <form method="post" class="d-flex gap-1 align-items-center">
+                                                <input type="hidden" name="action" value="matriz_avance">
+                                                <input type="hidden" name="tab" value="matriz">
+                                                <input type="hidden" name="line" value="{{ a.id }}">
+                                                <input type="number" class="form-control form-control-sm" name="porcentaje"
+                                                       min="0" max="100" step="5" value="{{ a.porcentaje|int }}" style="width:4.5rem">
+                                                <button class="btn btn-sm btn-outline-secondary" title="Guardar">%</button>
+                                            </form>
+                                            <div class="progress mt-1" style="height:6px">
+                                                <div class="progress-bar" style="width:{{ a.porcentaje }}%"></div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge text-bg-{{ a.estado_chip }}">{{ a.estado_label }}</span>
+                                        </td>
+                                        <td class="text-end">
+                                            <form method="post" class="d-inline" enctype="multipart/form-data">
+                                                <input type="hidden" name="action" value="matriz_evidencia">
+                                                <input type="hidden" name="tab" value="matriz">
+                                                <input type="hidden" name="line" value="{{ a.id }}">
+                                                <label class="btn btn-sm btn-outline-primary mb-0" title="Subir evidencia PDF">
+                                                    <i class="bi bi-paperclip"></i>
+                                                    <input type="file" name="evidencia" accept=".pdf,application/pdf" class="d-none" onchange="this.form.submit()">
+                                                </label>
+                                            </form>
+                                            <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar actividad?');">
+                                                <input type="hidden" name="action" value="matriz_delete">
+                                                <input type="hidden" name="tab" value="matriz">
+                                                <input type="hidden" name="line" value="{{ a.id }}">
+                                                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr><td colspan="5" class="text-center text-muted py-4">Sin actividades en este periodo.</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

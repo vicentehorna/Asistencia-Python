@@ -26,11 +26,13 @@ USING (VALUES
     ('solicitud_vacaciones', 'Solicitud de Vacaciones',   'portal_trabajador', 510, 'solicitud_vacaciones_page', '/solicitud-vacaciones', 'A'),
     ('solicitud_papeletas',  'Solicitud de Papeletas',    'portal_trabajador', 515, 'solicitud_papeletas_page', '/solicitud-papeletas', 'A'),
     ('banco_horas',          'Banco de Horas',            'portal_trabajador', 518, 'banco_horas_page', '/banco-horas', 'A'),
+    ('teletrabajo',          'Teletrabajo',               'portal_trabajador', 519, 'teletrabajo_page', '/teletrabajo', 'A'),
     ('detalle_vacaciones',   'Detalle de Vacaciones',     'portal_trabajador', 520, 'reporte_vacaciones_detalle_page', '/reporte-vacaciones-detalle', 'A'),
     ('saldo_vacaciones',     'Saldo de Vacaciones',       'portal_trabajador', 530, 'reporte_saldo_vacaciones_page', '/reporte-saldo-vacaciones', 'A'),
     ('aprobar_vacaciones',   'Aprobar Vacaciones',        'aprobaciones',      610, 'reporte_aprobar_vacaciones_page', '/reporte-aprobar-vacaciones', 'A'),
     ('aprobar_papeletas',    'Aprobar Papeletas',         'aprobaciones',      620, 'aprobar_papeletas_page', '/aprobar-papeletas', 'A'),
-    ('aprobar_compensaciones','Aprobar Compensaciones',   'aprobaciones',      630, 'aprobar_compensaciones_page', '/aprobar-compensaciones', 'A')
+    ('aprobar_compensaciones','Aprobar Compensaciones',   'aprobaciones',      630, 'aprobar_compensaciones_page', '/aprobar-compensaciones', 'A'),
+    ('aprobar_teletrabajo',  'Aprobar Teletrabajo',       'aprobaciones',      640, 'aprobar_teletrabajo_page', '/aprobar-teletrabajo', 'A')
 ) AS s (MenuCode, Title, ParentCode, SortOrder, Endpoint, RoutePrefix, Status)
 ON t.MenuCode = s.MenuCode
 WHEN MATCHED THEN
@@ -66,8 +68,9 @@ WHERE m.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador','solicitud_vacaciones','solicitud_papeletas','banco_horas','detalle_vacaciones','saldo_vacaciones',
-      'aprobar_vacaciones','aprobar_papeletas','aprobar_compensaciones'
+      'acceso_marcador','solicitud_vacaciones','solicitud_papeletas','banco_horas','teletrabajo',
+      'detalle_vacaciones','saldo_vacaciones',
+      'aprobar_vacaciones','aprobar_papeletas','aprobar_compensaciones','aprobar_teletrabajo'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
@@ -86,8 +89,9 @@ WHERE p.Status = 'A'
       'dashboard','maestro_horarios','tipos_justificacion','feriados','configurar_alertas',
       'perfiles_acceso','asignar_perfiles','gestion_marcas','justificaciones',
       'asignacion_horarios','procesar_asistencia','reporte_resumen','reporte_consolidado',
-      'acceso_marcador','solicitud_vacaciones','solicitud_papeletas','banco_horas','detalle_vacaciones','saldo_vacaciones',
-      'aprobar_vacaciones','aprobar_papeletas','aprobar_compensaciones'
+      'acceso_marcador','solicitud_vacaciones','solicitud_papeletas','banco_horas','teletrabajo',
+      'detalle_vacaciones','saldo_vacaciones',
+      'aprobar_vacaciones','aprobar_papeletas','aprobar_compensaciones','aprobar_teletrabajo'
   )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
@@ -99,14 +103,14 @@ INSERT INTO dbo.WEB_AccessProfileMenu (ProfileCode, MenuCode)
 SELECT 'SIMPLE', m.MenuCode
 FROM dbo.WEB_MenuOption m
 WHERE m.Status = 'A'
-  AND m.MenuCode IN ('solicitud_vacaciones', 'solicitud_papeletas', 'banco_horas', 'detalle_vacaciones', 'saldo_vacaciones')
+  AND m.MenuCode IN ('solicitud_vacaciones', 'solicitud_papeletas', 'banco_horas', 'teletrabajo', 'detalle_vacaciones', 'saldo_vacaciones')
   AND EXISTS (SELECT 1 FROM dbo.WEB_AccessProfile WHERE ProfileCode = 'SIMPLE')
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
         WHERE x.ProfileCode = 'SIMPLE' AND x.MenuCode = m.MenuCode
   );
 
-/* APROBADOR / JEFEAREA: bandejas de papeletas y compensaciones */
+/* APROBADOR / JEFEAREA: bandejas de papeletas, compensaciones y teletrabajo */
 INSERT INTO dbo.WEB_AccessProfileMenu (ProfileCode, MenuCode)
 SELECT p.ProfileCode, m.MenuCode
 FROM dbo.WEB_AccessProfile p
@@ -114,7 +118,11 @@ CROSS JOIN dbo.WEB_MenuOption m
 WHERE p.Status = 'A'
   AND p.ProfileCode IN ('APROBADOR', 'JEFEAREA')
   AND m.Status = 'A'
-  AND m.MenuCode IN ('aprobar_papeletas', 'solicitud_papeletas', 'aprobar_compensaciones', 'banco_horas')
+  AND m.MenuCode IN (
+      'aprobar_papeletas', 'solicitud_papeletas',
+      'aprobar_compensaciones', 'banco_horas',
+      'aprobar_teletrabajo', 'teletrabajo'
+  )
   AND NOT EXISTS (
         SELECT 1 FROM dbo.WEB_AccessProfileMenu x
         WHERE x.ProfileCode = p.ProfileCode AND x.MenuCode = m.MenuCode

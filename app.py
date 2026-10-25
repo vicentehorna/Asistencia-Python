@@ -101,6 +101,21 @@ from banco_horas import (
     aprobar_paso_compensacion,
     rechazar_paso_compensacion,
 )
+from teletrabajo import (
+    get_o_crear_acuerdo,
+    calendario_mes,
+    registrar_rol_teletrabajo,
+    get_historial_roles,
+    eliminar_rol_pendiente,
+    label_dias_remotos,
+    DIAS_SEMANA,
+    aprobar_paso_teletrabajo,
+    rechazar_paso_teletrabajo,
+    listar_matriz,
+    registrar_actividad_matriz,
+    actualizar_avance_matriz,
+    eliminar_actividad_matriz,
+)
 
 load_dotenv()
 app = Flask(__name__)
@@ -126,6 +141,8 @@ def _unauthorized_json_friendly():
         or path.startswith('/rechazar-papeletas')
         or path.startswith('/aprobar-compensaciones')
         or path.startswith('/rechazar-compensaciones')
+        or path.startswith('/aprobar-teletrabajo')
+        or path.startswith('/rechazar-teletrabajo')
         or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     )
     if wants_json:
@@ -255,6 +272,9 @@ def ensure_and_enforce_web_access():
         '/aprobar-compensaciones-lista',
         '/aprobar-compensaciones-nivel',
         '/rechazar-compensaciones-nivel',
+        '/aprobar-teletrabajo-lista',
+        '/aprobar-teletrabajo-nivel',
+        '/rechazar-teletrabajo-nivel',
     )
     if path.startswith(json_action_prefixes):
         return jsonify({"error": "No tiene permiso para esta opción."}), 403
@@ -2631,6 +2651,335 @@ def rechazar_compensaciones_nivel():
         return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
     except Exception as e:
         logging.exception('rechazar_compensaciones_nivel')
+        return jsonify({'error': f'Error al rechazar: {e}'}), 500
+
+
+def _matriz_items(rows):
+    out = []
+    chip_map = {
+        'CUMPLIDO': ('success', 'Cumplido'),
+        'EN_PROCESO': ('warning', 'En proceso'),
+        'OBSERVADO': ('danger', 'Observado'),
+    }
+    for r in rows or []:
+        est = str(r.get('EstadoEval') or 'EN_PROCESO').upper()
+        chip, label = chip_map.get(est, ('secondary', est))
+        try:
+            pct = float(r.get('PorcentajeAvance') or 0)
+        except (TypeError, ValueError):
+            pct = 0
+        out.append({
+            'id': r.get('Id'),
+            'actividad': r.get('Actividad') or '',
+            'entregable': r.get('Entregable') or '',
+            'fecha_limite_txt': fecha_filter(r.get('FechaLimite')),
+            'porcentaje': pct,
+            'estado_chip': chip,
+            'estado_label': label,
+            'comentario_jefe': r.get('ComentarioJefe') or '',
+        })
+    return out
+
+
+@app.route('/teletrabajo', methods=['GET', 'POST'])
+@login_required
+def teletrabajo_page():
+    ensure_user_session()
+    company, person = _vacaciones_company_person_solicitud()
+    hoy = fecha_hoy_peru()
+    periodo = str(request.values.get('periodo') or hoy.strftime('%Y-%m')).strip()
+    if not re.fullmatch(r'\d{4}-\d{2}', periodo):
+        periodo = hoy.strftime('%Y-%m')
+    tab = str(request.values.get('tab') or 'prog').strip().lower()
+    if tab not in ('prog', 'matriz'):
+        tab = 'prog'
+
+    if not person:
+        flash('Su usuario no tiene trabajador asociado.', 'warning')
+
+    action = str(request.form.get('action') or '').strip() if request.method == 'POST' else ''
+
+    if request.method == 'POST' and action == 'delete_rol':
+        sid = request.form.get('solicitud_id')
+        if company and person and sid and eliminar_rol_pendiente(company, person, sid):
+            flash('Solicitud de rol eliminada.', 'success')
+        else:
+            flash('No se pudo eliminar la solicitud.', 'warning')
+        return redirect(url_for('teletrabajo_page', periodo=periodo, tab='prog'))
+
+    if request.method == 'POST' and action == 'solicitar_rol':
+        dias = request.form.getlist('dias_remotos')
+        motivo = str(request.form.get('motivo') or '').strip()
+        per_form = str(request.form.get('periodo') or periodo).strip()
+        if not company or not person:
+            flash('No se pudo identificar su usuario.', 'error')
+        else:
+            ok, _line, err = registrar_rol_teletrabajo(
+                company, person, per_form, dias, motivo, current_user.id
+            )
+            if ok:
+                flash('Rol enviado a aprobación (Jefe → RR.HH.).', 'success')
+            else:
+                flash(err or 'No se pudo registrar el rol.', 'warning')
+        return redirect(url_for('teletrabajo_page', periodo=per_form or periodo, tab='prog'))
+
+    if request.method == 'POST' and action == 'matriz_nueva':
+        tab = 'matriz'
+        per_form = str(request.form.get('periodo') or periodo).strip()
+        ok, _line, err = registrar_actividad_matriz(
+            company, person, per_form,
+            request.form.get('actividad'),
+            request.form.get('entregable'),
+            request.form.get('fecha_limite'),
+            current_user.id,
+        )
+        flash('Actividad registrada.' if ok else (err or 'No se pudo registrar.'), 'success' if ok else 'warning')
+        return redirect(url_for('teletrabajo_page', periodo=per_form, tab='matriz'))
+
+    if request.method == 'POST' and action == 'matriz_avance':
+        tab = 'matriz'
+        line = request.form.get('line')
+        pct = request.form.get('porcentaje')
+        if company and person and line and actualizar_avance_matriz(
+            company, person, line, pct, user_id=current_user.id
+        ):
+            flash('Avance actualizado.', 'success')
+        else:
+            flash('No se pudo actualizar el avance.', 'warning')
+        return redirect(url_for('teletrabajo_page', periodo=periodo, tab='matriz'))
+
+    if request.method == 'POST' and action == 'matriz_evidencia':
+        tab = 'matriz'
+        line = request.form.get('line')
+        archivo = request.files.get('evidencia')
+        if not archivo or not archivo.filename:
+            flash('Seleccione un PDF.', 'warning')
+        elif not str(archivo.filename).lower().endswith('.pdf'):
+            flash('La evidencia debe ser PDF.', 'warning')
+        elif company and person and line:
+            nombre = f"Evidencia_TT_{person}_{line}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+            try:
+                archivo.stream.seek(0)
+            except Exception:
+                pass
+            local_name = guardar_sustento_local(archivo.stream, nombre, app_root=app.root_path)
+            if actualizar_avance_matriz(
+                company, person, line,
+                request.form.get('porcentaje') or 0,
+                user_id=current_user.id,
+                local_sustento=local_name,
+                nombre_sustento=nombre,
+            ):
+                flash('Evidencia adjuntada.', 'success')
+            else:
+                flash('No se pudo guardar la evidencia.', 'warning')
+        return redirect(url_for('teletrabajo_page', periodo=periodo, tab='matriz'))
+
+    if request.method == 'POST' and action == 'matriz_delete':
+        tab = 'matriz'
+        line = request.form.get('line')
+        if company and person and line and eliminar_actividad_matriz(company, person, line):
+            flash('Actividad eliminada.', 'success')
+        else:
+            flash('No se pudo eliminar.', 'warning')
+        return redirect(url_for('teletrabajo_page', periodo=periodo, tab='matriz'))
+
+    acuerdo = get_o_crear_acuerdo(company, person) if company and person else None
+    y, m = int(periodo[:4]), int(periodo[5:7])
+    semanas = calendario_mes(company, person, y, m) if company and person else []
+    roles_raw = get_historial_roles(company, person) if company and person else []
+    historial_roles = []
+    for r in roles_raw:
+        flujo = r.get('flujo') or {}
+        status = str(r.get('status') or '').upper()
+        can_delete = status == 'P' and not any(
+            str(p.get('Estado') or '').upper() == 'A' for p in (r.get('pasos_flujo') or [])
+        )
+        historial_roles.append({
+            'id': r.get('Id'),
+            'periodo': r.get('Periodo'),
+            'dias_label': r.get('dias_label') or label_dias_remotos(r.get('DiasRemotos')),
+            'flujo_label': flujo.get('label') or status,
+            'flujo_chip': flujo.get('chip') or 'secondary',
+            'can_delete': can_delete,
+        })
+    matriz = _matriz_items(listar_matriz(company, person, periodo) if company and person else [])
+    meses = {
+        1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril', 5: 'Mayo', 6: 'Junio',
+        7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre',
+    }
+    return render_template(
+        'teletrabajo.html',
+        acuerdo=acuerdo,
+        nombre_persona=_nombre_persona_sesion(person) if person else '',
+        periodo=periodo,
+        periodo_label=f'{meses.get(m, m)} {y}',
+        semanas=semanas,
+        historial_roles=historial_roles,
+        matriz=matriz,
+        tab=tab,
+        dias_semana_opts=[(n, DIAS_SEMANA[n]) for n in range(1, 6)],
+    )
+
+
+@app.route('/aprobar-teletrabajo')
+@login_required
+def aprobar_teletrabajo_page():
+    ensure_user_session()
+    return render_template('aprobar_teletrabajo.html')
+
+
+@app.route('/aprobar-teletrabajo-lista', methods=['POST'])
+@login_required
+def aprobar_teletrabajo_lista():
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = _reporte_compania_usuario_logueado()
+    dni = str(body.get('dni') or '').strip()
+    if not cia:
+        return jsonify({'error': 'No se pudo identificar la compañía del usuario.'}), 400
+    actor = _actor_flujo_vacaciones_ctx()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_ca_aprobar_teletrabajo_web @cia=?, @person=?, @dni=?',
+            (cia, '0', dni),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        out = []
+        for r in rows:
+            status_code = str(r.get('status') or '').strip().upper() or 'P'
+            try:
+                sid_int = int(r.get('id')) if r.get('id') is not None else None
+            except (TypeError, ValueError):
+                sid_int = None
+            person_row = str(r.get('person') or '').strip()
+            flujo_label = status_code
+            flujo_chip = 'secondary'
+            flujo_detalle = str(r.get('descripcion_nivel') or r.get('estado_flujo') or '').strip()
+            can_approve = False
+            if sid_int is not None and person_row and status_code == 'P':
+                from database import resolver_accion_flujo
+                accion = resolver_accion_flujo(
+                    cia, person_row, sid_int,
+                    actor['person_actor'], actor['profilecode'],
+                    menus=actor['menus'],
+                    unrestricted=actor['unrestricted'],
+                    web_admin=actor['web_admin'],
+                    approval_userid=str(getattr(current_user, 'id', '') or ''),
+                    tipo_solicitud='TELETRABAJO',
+                )
+                resumen = accion.get('resumen') or {}
+                flujo_label = resumen.get('label') or flujo_detalle or 'Pendiente'
+                flujo_chip = resumen.get('chip') or 'warning'
+                can_approve = bool(accion.get('can_approve'))
+            elif status_code == 'A':
+                flujo_label, flujo_chip = 'Aprobado', 'success'
+            elif status_code == 'R':
+                flujo_label, flujo_chip = 'Rechazado', 'danger'
+            out.append({
+                'id': sid_int,
+                'person': person_row,
+                'name': str(r.get('name') or '').strip(),
+                'periodo': str(r.get('periodo') or '').strip(),
+                'dias_label': label_dias_remotos(r.get('diasremotos')),
+                'motivo': str(r.get('motivo') or '').strip(),
+                'status': status_code,
+                'flujo_label': flujo_label,
+                'flujo_chip': flujo_chip,
+                'can_approve': can_approve,
+            })
+        return jsonify({'rows': out})
+    except Exception as e:
+        logging.exception('aprobar_teletrabajo_lista')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/aprobar-teletrabajo-nivel', methods=['POST'])
+@login_required
+def aprobar_teletrabajo_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id')
+        person_dni = str(body.get('person') or '').strip()
+        observacion = str(body.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni:
+            return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = aprobar_paso_teletrabajo(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion or None,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('aprobar_teletrabajo_nivel')
+        return jsonify({'error': f'Error al aprobar: {e}'}), 500
+
+
+@app.route('/rechazar-teletrabajo-nivel', methods=['POST'])
+@login_required
+def rechazar_teletrabajo_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id')
+        person_dni = str(body.get('person') or '').strip()
+        observacion = str(body.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni:
+            return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+        if not observacion:
+            return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = rechazar_paso_teletrabajo(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('rechazar_teletrabajo_nivel')
         return jsonify({'error': f'Error al rechazar: {e}'}), 500
 
 

@@ -474,6 +474,13 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if can_menu('teletrabajo') %}
+                <li class="{{ 'active' if request.endpoint == 'teletrabajo_page' else '' }}">
+                    <a href="{{ url_for('teletrabajo_page') }}" title="Teletrabajo">
+                        <i class="bi bi-house-door"></i><span class="sidebar-link-text">Teletrabajo</span>
+                    </a>
+                </li>
+                {% endif %}
                 {% if can_menu('detalle_vacaciones') %}
                 <li class="{{ 'active' if request.endpoint == 'reporte_vacaciones_detalle_page' else '' }}">
                     <a href="{{ url_for('reporte_vacaciones_detalle_page') }}" title="Detalle de Vacaciones">
@@ -489,7 +496,7 @@
                 </li>
                 {% endif %}
 
-                {% if can_menu('aprobar_vacaciones') or can_menu('aprobar_papeletas') or can_menu('aprobar_compensaciones') %}
+                {% if can_menu('aprobar_vacaciones') or can_menu('aprobar_papeletas') or can_menu('aprobar_compensaciones') or can_menu('aprobar_teletrabajo') %}
                 <li class="py-0">
                     <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Aprobaciones</p>
                 </li>
@@ -512,6 +519,13 @@
                 <li class="{{ 'active' if request.endpoint == 'aprobar_compensaciones_page' else '' }}">
                     <a href="{{ url_for('aprobar_compensaciones_page') }}" title="Aprobar Compensaciones">
                         <i class="bi bi-ui-checks-grid"></i><span class="sidebar-link-text">Aprobar Compensaciones</span>
+                    </a>
+                </li>
+                {% endif %}
+                {% if can_menu('aprobar_teletrabajo') %}
+                <li class="{{ 'active' if request.endpoint == 'aprobar_teletrabajo_page' else '' }}">
+                    <a href="{{ url_for('aprobar_teletrabajo_page') }}" title="Aprobar Teletrabajo">
+                        <i class="bi bi-house-check"></i><span class="sidebar-link-text">Aprobar Teletrabajo</span>
                     </a>
                 </li>
                 {% endif %}

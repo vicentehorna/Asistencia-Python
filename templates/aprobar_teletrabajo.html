@@ -1,0 +1,168 @@
+{% extends "layout.html" %}
+
+{% block title %}Aprobar teletrabajo{% endblock %}
+
+{% block extra_css %}
+<style>
+    .table-tt th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h4 class="mb-0 fw-bold text-secondary">
+        <i class="bi bi-house-check me-2"></i>Aprobar teletrabajo
+    </h4>
+    <div class="small text-muted">Roles mensuales · flujo Jefe → RR.HH.</div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <form id="frmFiltrosTT" class="row g-2 align-items-end" onsubmit="return false;">
+            <div class="col-12 col-md-4">
+                <label class="form-label small fw-semibold text-muted mb-1" for="filtroDni">DNI / código</label>
+                <input type="text" class="form-control form-control-sm" id="filtroDni" placeholder="Opcional">
+            </div>
+            <div class="col-auto">
+                <button type="button" class="btn btn-primary btn-sm" id="btnBuscarTT">
+                    <i class="bi bi-search me-1"></i>Buscar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle table-tt mb-0">
+                <thead>
+                    <tr>
+                        <th>Trabajador</th>
+                        <th>Periodo</th>
+                        <th>Días remotos</th>
+                        <th>Motivo</th>
+                        <th>Estado</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="tbTT">
+                    <tr><td colspan="6" class="text-center text-muted py-4">Pulse Buscar para cargar la bandeja.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const URL_LISTA = {{ url_for('aprobar_teletrabajo_lista') | tojson }};
+    const URL_APROBAR = {{ url_for('aprobar_teletrabajo_nivel') | tojson }};
+    const URL_RECHAZAR = {{ url_for('rechazar_teletrabajo_nivel') | tojson }};
+
+    function toastOk(m) { if (window.HmUi) HmUi.exito(m); else alert(m); }
+    function toastErr(m) { if (window.HmUi) HmUi.error(m); else alert(m); }
+    function confirmar(opts) {
+        if (window.HmUi && typeof HmUi.confirmar === 'function') return HmUi.confirmar(opts);
+        return Promise.resolve(window.confirm(opts && opts.texto ? opts.texto : '¿Confirmar?'));
+    }
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    async function cargar() {
+        const tb = document.getElementById('tbTT');
+        tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Cargando...</td></tr>';
+        try {
+            const res = await fetch(URL_LISTA, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ dni: document.getElementById('filtroDni').value || '' }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al cargar');
+            const rows = data.rows || [];
+            if (!rows.length) {
+                tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sin solicitudes.</td></tr>';
+                return;
+            }
+            tb.innerHTML = rows.map(function (r) {
+                let actions = '';
+                if (r.can_approve) {
+                    actions += `<button type="button" class="btn btn-sm btn-success btn-aprob" data-id="${esc(r.id)}" data-person="${esc(r.person)}" title="Aprobar"><i class="bi bi-check-lg"></i></button>`;
+                    actions += `<button type="button" class="btn btn-sm btn-outline-danger btn-rech" data-id="${esc(r.id)}" data-person="${esc(r.person)}" title="Rechazar"><i class="bi bi-x-lg"></i></button>`;
+                }
+                if (!actions) actions = '<span class="text-muted">—</span>';
+                return `<tr>
+                    <td><div class="fw-semibold">${esc(r.name)}</div><div class="small text-muted">${esc(r.person)}</div></td>
+                    <td>${esc(r.periodo)}</td>
+                    <td class="small">${esc(r.dias_label)}</td>
+                    <td class="small">${esc(r.motivo || '')}</td>
+                    <td><span class="badge text-bg-${esc(r.flujo_chip || 'secondary')}">${esc(r.flujo_label || r.status)}</span></td>
+                    <td class="text-end"><div class="d-inline-flex gap-1">${actions}</div></td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            tb.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">${esc(e.message || e)}</td></tr>`;
+        }
+    }
+
+    document.getElementById('btnBuscarTT').addEventListener('click', cargar);
+    document.getElementById('filtroDni').addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); cargar(); }
+    });
+
+    document.getElementById('tbTT').addEventListener('click', async function (ev) {
+        const btnA = ev.target.closest('.btn-aprob');
+        const btnR = ev.target.closest('.btn-rech');
+        if (!btnA && !btnR) return;
+        const el = btnA || btnR;
+        const id = el.getAttribute('data-id');
+        const person = el.getAttribute('data-person');
+        if (btnA) {
+            const ok = await confirmar({ titulo: 'Aprobar rol', texto: '¿Confirma la aprobación de este nivel?', confirmarTexto: 'Aprobar' });
+            if (!ok) return;
+            try {
+                const res = await fetch(URL_APROBAR, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ solicitud_id: id, person: person }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'No se pudo aprobar');
+                toastOk(data.message || 'Aprobado');
+                cargar();
+            } catch (e) { toastErr(e.message || String(e)); }
+            return;
+        }
+        let motivo = '';
+        if (window.HmUi && typeof HmUi.promptTexto === 'function') {
+            motivo = await HmUi.promptTexto({ titulo: 'Rechazar rol', placeholder: 'Motivo de rechazo (obligatorio)' });
+        } else {
+            motivo = window.prompt('Motivo de rechazo (obligatorio):') || '';
+        }
+        if (!motivo || !String(motivo).trim()) {
+            toastErr('El motivo de rechazo es obligatorio.');
+            return;
+        }
+        try {
+            const res = await fetch(URL_RECHAZAR, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({ solicitud_id: id, person: person, observacion: String(motivo).trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'No se pudo rechazar');
+            toastOk(data.message || 'Rechazado');
+            cargar();
+        } catch (e) { toastErr(e.message || String(e)); }
+    });
+
+    cargar();
+});
+</script>
+{% endblock %}
