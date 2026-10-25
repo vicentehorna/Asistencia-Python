@@ -1,0 +1,227 @@
+{% extends "layout.html" %}
+
+{% block title %}Banco de horas{% endblock %}
+
+{% block extra_css %}
+<style>
+    .kpi-card { border: 0; border-radius: 1rem; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+    .kpi-card .kpi-value { font-size: 1.75rem; font-weight: 800; line-height: 1.1; }
+    .kpi-favor { border-left: 4px solid #16a34a; }
+    .kpi-deuda { border-left: 4px solid #ea580c; }
+    .kpi-goce  { border-left: 4px solid #2563eb; }
+    .form-label-compact { font-size: 0.78rem; font-weight: 700; color: #64748b; margin-bottom: 0.35rem; }
+    .table-bh th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .03em; color: #475569; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h4 class="mb-0 fw-bold text-secondary">
+        <i class="bi bi-clock-history me-2"></i>Banco de horas / Compensación
+    </h4>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-12 col-md-4">
+        <div class="card kpi-card kpi-favor h-100">
+            <div class="card-body">
+                <div class="small text-muted fw-semibold text-uppercase">Saldo a favor</div>
+                <div class="kpi-value text-success">{{ '%.2f'|format(resumen.saldo_favor or 0) }} h</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4">
+        <div class="card kpi-card kpi-deuda h-100">
+            <div class="card-body">
+                <div class="small text-muted fw-semibold text-uppercase">Horas deudoras</div>
+                <div class="kpi-value text-warning">{{ '%.2f'|format(resumen.deuda or 0) }} h</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4">
+        <div class="card kpi-card kpi-goce h-100">
+            <div class="card-body">
+                <div class="small text-muted fw-semibold text-uppercase">Horas gozadas</div>
+                <div class="kpi-value text-primary">{{ '%.2f'|format(resumen.gozadas or 0) }} h</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-12 col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0 fw-bold text-secondary">Registrar sobretiempo</h5>
+            </div>
+            <div class="card-body pt-2">
+                <form method="post" enctype="multipart/form-data" novalidate>
+                    <input type="hidden" name="action" value="sobretiempo">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label-compact" for="st_fecha">Fecha</label>
+                            <input type="date" class="form-control form-control-sm" id="st_fecha" name="fecha" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label-compact" for="st_hi">Hora inicio</label>
+                            <input type="time" class="form-control form-control-sm" id="st_hi" name="hora_inicio" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label-compact" for="st_hf">Hora fin</label>
+                            <input type="time" class="form-control form-control-sm" id="st_hf" name="hora_fin" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label-compact" for="st_motivo">Motivo institucional</label>
+                            <textarea class="form-control form-control-sm" id="st_motivo" name="motivo" rows="2" maxlength="500" required></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label-compact" for="st_sustento">Sustento PDF (opcional)</label>
+                            <input type="file" class="form-control form-control-sm" id="st_sustento" name="sustento" accept=".pdf,application/pdf">
+                        </div>
+                        <div class="col-12 d-grid">
+                            <button type="submit" class="btn btn-primary btn-sm fw-semibold">
+                                <i class="bi bi-plus-lg me-1"></i>Enviar sobretiempo
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0 fw-bold text-secondary">Solicitar goce compensatorio</h5>
+            </div>
+            <div class="card-body pt-2">
+                <form method="post" novalidate>
+                    <input type="hidden" name="action" value="goce">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label-compact" for="gc_fecha">Fecha de goce</label>
+                            <input type="date" class="form-control form-control-sm" id="gc_fecha" name="fecha"
+                                   min="{{ fecha_min_hoy }}" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label-compact" for="gc_hi">Hora inicio</label>
+                            <input type="time" class="form-control form-control-sm" id="gc_hi" name="hora_inicio" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label-compact" for="gc_hf">Hora fin</label>
+                            <input type="time" class="form-control form-control-sm" id="gc_hf" name="hora_fin" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label-compact" for="gc_motivo">Motivo</label>
+                            <textarea class="form-control form-control-sm" id="gc_motivo" name="motivo" rows="2" maxlength="500"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="small text-muted mb-2">
+                                Disponible: <strong>{{ '%.2f'|format(resumen.saldo_favor or 0) }} h</strong>
+                            </div>
+                        </div>
+                        <div class="col-12 d-grid">
+                            <button type="submit" class="btn btn-outline-primary btn-sm fw-semibold"
+                                    {% if (resumen.saldo_favor_min or 0) <= 0 %}disabled{% endif %}>
+                                <i class="bi bi-calendar2-check me-1"></i>Solicitar goce
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white border-0 pt-3">
+        <ul class="nav nav-tabs card-header-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabSt" type="button">Acumulaciones / Sobretiempo</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGc" type="button">Goces / Compensaciones</button>
+            </li>
+        </ul>
+    </div>
+    <div class="card-body">
+        <div class="tab-content">
+            <div class="tab-pane fade show active" id="tabSt">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle table-bh mb-0">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Horario</th>
+                                <th>Horas</th>
+                                <th>Motivo</th>
+                                <th>Estado</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in historial_st %}
+                            <tr>
+                                <td>{{ row.fecha_txt }}</td>
+                                <td class="small">{{ row.horario }}</td>
+                                <td>{{ row.horas_txt }}</td>
+                                <td class="small">{{ row.motivo }}</td>
+                                <td><span class="badge text-bg-{{ row.flujo_chip }}">{{ row.flujo_label }}</span></td>
+                                <td class="text-end">
+                                    {% if row.can_delete %}
+                                    <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar este registro?');">
+                                        <input type="hidden" name="action" value="delete_st">
+                                        <input type="hidden" name="solicitud_id" value="{{ row.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                    {% else %}—{% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="text-center text-muted py-4">Sin registros de sobretiempo.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="tabGc">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle table-bh mb-0">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Horario</th>
+                                <th>Horas</th>
+                                <th>Motivo</th>
+                                <th>Estado</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in historial_gc %}
+                            <tr>
+                                <td>{{ row.fecha_txt }}</td>
+                                <td class="small">{{ row.horario }}</td>
+                                <td>{{ row.horas_txt }}</td>
+                                <td class="small">{{ row.motivo }}</td>
+                                <td><span class="badge text-bg-{{ row.flujo_chip }}">{{ row.flujo_label }}</span></td>
+                                <td class="text-end">
+                                    {% if row.can_delete %}
+                                    <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar este goce?');">
+                                        <input type="hidden" name="action" value="delete_gc">
+                                        <input type="hidden" name="solicitud_id" value="{{ row.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                    {% else %}—{% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="text-center text-muted py-4">Sin solicitudes de goce.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

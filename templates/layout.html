@@ -467,6 +467,13 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if can_menu('banco_horas') %}
+                <li class="{{ 'active' if request.endpoint == 'banco_horas_page' else '' }}">
+                    <a href="{{ url_for('banco_horas_page') }}" title="Banco de Horas">
+                        <i class="bi bi-clock-history"></i><span class="sidebar-link-text">Banco de Horas</span>
+                    </a>
+                </li>
+                {% endif %}
                 {% if can_menu('detalle_vacaciones') %}
                 <li class="{{ 'active' if request.endpoint == 'reporte_vacaciones_detalle_page' else '' }}">
                     <a href="{{ url_for('reporte_vacaciones_detalle_page') }}" title="Detalle de Vacaciones">
@@ -482,7 +489,7 @@
                 </li>
                 {% endif %}
 
-                {% if can_menu('aprobar_vacaciones') or can_menu('aprobar_papeletas') %}
+                {% if can_menu('aprobar_vacaciones') or can_menu('aprobar_papeletas') or can_menu('aprobar_compensaciones') %}
                 <li class="py-0">
                     <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Aprobaciones</p>
                 </li>
@@ -498,6 +505,13 @@
                 <li class="{{ 'active' if request.endpoint == 'aprobar_papeletas_page' else '' }}">
                     <a href="{{ url_for('aprobar_papeletas_page') }}" title="Aprobar Papeletas">
                         <i class="bi bi-ui-checks"></i><span class="sidebar-link-text">Aprobar Papeletas</span>
+                    </a>
+                </li>
+                {% endif %}
+                {% if can_menu('aprobar_compensaciones') %}
+                <li class="{{ 'active' if request.endpoint == 'aprobar_compensaciones_page' else '' }}">
+                    <a href="{{ url_for('aprobar_compensaciones_page') }}" title="Aprobar Compensaciones">
+                        <i class="bi bi-ui-checks-grid"></i><span class="sidebar-link-text">Aprobar Compensaciones</span>
                     </a>
                 </li>
                 {% endif %}

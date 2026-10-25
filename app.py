@@ -89,6 +89,18 @@ from papeletas import (
     aprobar_paso_flujo_papeleta,
     rechazar_paso_flujo_papeleta,
 )
+from banco_horas import (
+    get_resumen_banco_horas,
+    registrar_sobretiempo,
+    registrar_goce,
+    get_historial_sobretiempo,
+    get_historial_goce,
+    eliminar_sobretiempo,
+    eliminar_goce,
+    minutos_a_horas_label,
+    aprobar_paso_compensacion,
+    rechazar_paso_compensacion,
+)
 
 load_dotenv()
 app = Flask(__name__)
@@ -112,6 +124,8 @@ def _unauthorized_json_friendly():
         or path.startswith('/reporte_aprobar_vacaciones')
         or path.startswith('/aprobar-papeletas')
         or path.startswith('/rechazar-papeletas')
+        or path.startswith('/aprobar-compensaciones')
+        or path.startswith('/rechazar-compensaciones')
         or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     )
     if wants_json:
@@ -238,6 +252,9 @@ def ensure_and_enforce_web_access():
         '/aprobar-papeletas-lista',
         '/aprobar-papeletas-nivel',
         '/rechazar-papeletas-nivel',
+        '/aprobar-compensaciones-lista',
+        '/aprobar-compensaciones-nivel',
+        '/rechazar-compensaciones-nivel',
     )
     if path.startswith(json_action_prefixes):
         return jsonify({"error": "No tiene permiso para esta opción."}), 403
@@ -2302,6 +2319,319 @@ def descargar_sustento_papeleta():
         download_name=nombre_archivo,
         mimetype=mime,
     )
+
+
+def _historial_banco_items(rows):
+    out = []
+    for r in rows or []:
+        flujo = r.get('flujo') or {}
+        status = str(r.get('status') or '').upper()
+        can_delete = status == 'P' and not any(
+            str(p.get('Estado') or '').upper() == 'A' for p in (r.get('pasos_flujo') or [])
+        )
+        hi = str(r.get('HoraInicio') or '')[:5]
+        hf = str(r.get('HoraFin') or '')[:5]
+        mins = int(r.get('Minutos') or 0)
+        out.append({
+            'id': r.get('Id'),
+            'fecha_txt': fecha_filter(r.get('Fecha')),
+            'horario': f'{hi}-{hf}',
+            'horas_txt': f'{minutos_a_horas_label(mins):.2f}',
+            'motivo': r.get('Motivo') or '',
+            'flujo_label': flujo.get('label') or status,
+            'flujo_chip': flujo.get('chip') or 'secondary',
+            'can_delete': can_delete,
+        })
+    return out
+
+
+@app.route('/banco-horas', methods=['GET', 'POST'])
+@login_required
+def banco_horas_page():
+    ensure_user_session()
+    company, person = _vacaciones_company_person_solicitud()
+    hoy_peru = fecha_hoy_peru()
+    fecha_min_hoy = hoy_peru.strftime('%Y-%m-%d')
+
+    if not person:
+        flash(
+            'Su usuario no tiene un trabajador asociado. '
+            'El banco de horas requiere Person en sesión.',
+            'warning',
+        )
+
+    action = str(request.form.get('action') or '').strip() if request.method == 'POST' else ''
+
+    if request.method == 'POST' and action == 'delete_st':
+        sid = request.form.get('solicitud_id')
+        if company and person and sid and eliminar_sobretiempo(company, person, sid):
+            flash('Registro de sobretiempo eliminado.', 'success')
+        else:
+            flash('No se pudo eliminar (solo pendientes sin aprobación parcial).', 'warning')
+        return redirect(url_for('banco_horas_page'))
+
+    if request.method == 'POST' and action == 'delete_gc':
+        sid = request.form.get('solicitud_id')
+        if company and person and sid and eliminar_goce(company, person, sid):
+            flash('Solicitud de goce eliminada.', 'success')
+        else:
+            flash('No se pudo eliminar (solo pendientes sin aprobación parcial).', 'warning')
+        return redirect(url_for('banco_horas_page'))
+
+    if request.method == 'POST' and action == 'sobretiempo':
+        fecha = str(request.form.get('fecha') or '').strip()
+        hi = str(request.form.get('hora_inicio') or '').strip()
+        hf = str(request.form.get('hora_fin') or '').strip()
+        motivo = str(request.form.get('motivo') or '').strip()
+        archivo = request.files.get('sustento')
+        if not company or not person:
+            flash('No se pudo identificar su usuario.', 'error')
+        elif not fecha or not hi or not hf or not motivo:
+            flash('Complete fecha, horario y motivo.', 'warning')
+        else:
+            local_filename = None
+            nombre_sustento = None
+            if archivo and archivo.filename:
+                if not str(archivo.filename).lower().endswith('.pdf'):
+                    flash('El sustento debe ser PDF.', 'warning')
+                    return redirect(url_for('banco_horas_page'))
+                nombre_sustento = f"Sustento_Sobretiempo_{person}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+                try:
+                    archivo.stream.seek(0)
+                except Exception:
+                    pass
+                local_filename = guardar_sustento_local(
+                    archivo.stream, nombre_sustento, app_root=app.root_path
+                )
+            ok, _line, err = registrar_sobretiempo(
+                company, person, fecha, hi, hf, motivo, current_user.id,
+                local_sustento=local_filename, nombre_sustento=nombre_sustento,
+            )
+            if ok:
+                flash('Sobretiempo registrado. Pendiente de aprobación.', 'success')
+            else:
+                flash(err or 'No se pudo registrar el sobretiempo.', 'error')
+        return redirect(url_for('banco_horas_page'))
+
+    if request.method == 'POST' and action == 'goce':
+        fecha = str(request.form.get('fecha') or '').strip()
+        hi = str(request.form.get('hora_inicio') or '').strip()
+        hf = str(request.form.get('hora_fin') or '').strip()
+        motivo = str(request.form.get('motivo') or '').strip()
+        if not company or not person:
+            flash('No se pudo identificar su usuario.', 'error')
+        elif not fecha or not hi or not hf:
+            flash('Complete fecha y horario de goce.', 'warning')
+        else:
+            ok, _line, err = registrar_goce(
+                company, person, fecha, hi, hf, motivo, current_user.id
+            )
+            if ok:
+                flash('Goce compensatorio solicitado. Pendiente de aprobación.', 'success')
+            else:
+                flash(err or 'No se pudo solicitar el goce.', 'warning')
+        return redirect(url_for('banco_horas_page'))
+
+    resumen = get_resumen_banco_horas(company, person) if company and person else {
+        'saldo_favor': 0, 'deuda': 0, 'gozadas': 0, 'saldo_favor_min': 0,
+    }
+    historial_st = _historial_banco_items(
+        get_historial_sobretiempo(company, person) if company and person else []
+    )
+    historial_gc = _historial_banco_items(
+        get_historial_goce(company, person) if company and person else []
+    )
+    return render_template(
+        'banco_horas.html',
+        resumen=resumen,
+        historial_st=historial_st,
+        historial_gc=historial_gc,
+        fecha_min_hoy=fecha_min_hoy,
+    )
+
+
+@app.route('/aprobar-compensaciones')
+@login_required
+def aprobar_compensaciones_page():
+    ensure_user_session()
+    return render_template('aprobar_compensaciones.html')
+
+
+@app.route('/aprobar-compensaciones-lista', methods=['POST'])
+@login_required
+def aprobar_compensaciones_lista():
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = _reporte_compania_usuario_logueado()
+    dni = str(body.get('dni') or '').strip()
+    tipo_filtro = str(body.get('tipo') or '').strip().upper()
+    if not cia:
+        return jsonify({'error': 'No se pudo identificar la compañía del usuario.'}), 400
+    actor = _actor_flujo_vacaciones_ctx()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_ca_aprobar_compensaciones_web @cia=?, @person=?, @dni=?',
+            (cia, '0', dni),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        out = []
+        for r in rows:
+            tipo = str(r.get('tiposolicitud') or '').strip().upper()
+            if tipo_filtro and tipo != tipo_filtro:
+                continue
+            status_code = str(r.get('status') or '').strip().upper() or 'P'
+            try:
+                sid_int = int(r.get('id')) if r.get('id') is not None else None
+            except (TypeError, ValueError):
+                sid_int = None
+            person_row = str(r.get('person') or '').strip()
+            flujo_label = status_code
+            flujo_chip = 'secondary'
+            flujo_detalle = str(r.get('descripcion_nivel') or r.get('estado_flujo') or '').strip()
+            can_approve = can_reject = False
+            if sid_int is not None and person_row and status_code == 'P' and tipo in ('SOBRETIEMPO', 'GOCE_COMP'):
+                from database import resolver_accion_flujo
+                accion = resolver_accion_flujo(
+                    cia, person_row, sid_int,
+                    actor['person_actor'], actor['profilecode'],
+                    menus=actor['menus'],
+                    unrestricted=actor['unrestricted'],
+                    web_admin=actor['web_admin'],
+                    approval_userid=str(getattr(current_user, 'id', '') or ''),
+                    tipo_solicitud=tipo,
+                )
+                resumen = accion.get('resumen') or {}
+                flujo_label = resumen.get('label') or flujo_detalle or 'Pendiente'
+                flujo_chip = resumen.get('chip') or 'warning'
+                flujo_detalle = resumen.get('detalle') or flujo_detalle
+                can_approve = bool(accion.get('can_approve'))
+                can_reject = bool(accion.get('can_reject'))
+            elif status_code == 'A':
+                flujo_label, flujo_chip, flujo_detalle = 'Aprobado', 'success', 'Aprobado'
+            elif status_code == 'R':
+                flujo_label, flujo_chip, flujo_detalle = 'Rechazado', 'danger', 'Rechazado'
+
+            mins = 0
+            try:
+                mins = int(r.get('minutos') or 0)
+            except (TypeError, ValueError):
+                mins = 0
+            hi = str(r.get('horainicio') or '')[:5]
+            hf = str(r.get('horafin') or '')[:5]
+            detalle = f"{fecha_filter(r.get('fecha'))} {hi}-{hf}"
+            if r.get('motivo'):
+                detalle = f"{detalle} · {str(r.get('motivo'))[:80]}"
+            out.append({
+                'id': sid_int,
+                'person': person_row,
+                'name': str(r.get('name') or '').strip(),
+                'tipo': tipo,
+                'detalle': detalle,
+                'horas_txt': f'{minutos_a_horas_label(mins):.2f}',
+                'status': status_code,
+                'flujo_label': flujo_label,
+                'flujo_chip': flujo_chip,
+                'flujo_detalle': flujo_detalle,
+                'can_approve': can_approve,
+                'can_reject': can_reject,
+            })
+        return jsonify({'rows': out})
+    except Exception as e:
+        logging.exception('aprobar_compensaciones_lista')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/aprobar-compensaciones-nivel', methods=['POST'])
+@login_required
+def aprobar_compensaciones_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id')
+        person_dni = str(body.get('person') or '').strip()
+        tipo = str(body.get('tipo_solicitud') or '').strip().upper()
+        observacion = str(body.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni or tipo not in ('SOBRETIEMPO', 'GOCE_COMP'):
+            return jsonify({'error': 'Datos de solicitud incompletos.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = aprobar_paso_compensacion(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            tipo_solicitud=tipo,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion or None,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('aprobar_compensaciones_nivel')
+        return jsonify({'error': f'Error al aprobar: {e}'}), 500
+
+
+@app.route('/rechazar-compensaciones-nivel', methods=['POST'])
+@login_required
+def rechazar_compensaciones_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id')
+        person_dni = str(body.get('person') or '').strip()
+        tipo = str(body.get('tipo_solicitud') or '').strip().upper()
+        observacion = str(body.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni or tipo not in ('SOBRETIEMPO', 'GOCE_COMP'):
+            return jsonify({'error': 'Datos de solicitud incompletos.'}), 400
+        if not observacion:
+            return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = rechazar_paso_compensacion(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            tipo_solicitud=tipo,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('rechazar_compensaciones_nivel')
+        return jsonify({'error': f'Error al rechazar: {e}'}), 500
 
 
 @app.route('/perfiles-acceso')
