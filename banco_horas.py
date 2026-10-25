@@ -116,6 +116,58 @@ def _insert_movimiento(cursor, company, person, tipo_mov, origen, fecha, minutos
     )
 
 
+# Jornada estándar para convertir días de papeleta a minutos deudores (demo PromPerú).
+MINUTOS_JORNADA_DIA = 480  # 8 h
+
+
+def minutos_desde_papeleta(modo, horas=None, dias=None, hora_inicio=None, hora_fin=None):
+    """Convierte una papeleta a minutos para el banco (deuda)."""
+    modo_s = str(modo or 'H').strip().upper()[:1]
+    if modo_s == 'D':
+        try:
+            d = int(dias or 0)
+        except (TypeError, ValueError):
+            d = 0
+        return max(0, d * MINUTOS_JORNADA_DIA)
+    # Modo horas
+    try:
+        h = float(horas or 0)
+    except (TypeError, ValueError):
+        h = 0.0
+    if h > 0:
+        return max(0, int(round(h * 60)))
+    return calc_minutos_rango(hora_inicio, hora_fin)
+
+
+def abonar_deuda_papeleta_personal(cursor, company, person, papeleta_line, papeleta_row, user_id):
+    """
+    Si la papeleta es Asuntos Personales (PERSONAL), registra DEUDA en el banco.
+    Idempotente por RefTipo=PAPELETA + RefLine.
+    Retorna minutos abonados (0 si no aplica).
+    """
+    tipo = str((papeleta_row or {}).get('TipoCodigo') or '').strip().upper()
+    if tipo != 'PERSONAL':
+        return 0
+    minutos = minutos_desde_papeleta(
+        (papeleta_row or {}).get('Modo'),
+        horas=(papeleta_row or {}).get('Horas'),
+        dias=(papeleta_row or {}).get('Dias'),
+        hora_inicio=(papeleta_row or {}).get('HoraInicio'),
+        hora_fin=(papeleta_row or {}).get('HoraFin'),
+    )
+    if minutos <= 0:
+        return 0
+    fecha = (papeleta_row or {}).get('Fecha') or (papeleta_row or {}).get('FechaInicio')
+    motivo = (papeleta_row or {}).get('Motivo') or 'Papeleta asuntos personales'
+    _insert_movimiento(
+        cursor, company, person, 'DEUDA', 'PAPELETA_PERSONAL',
+        fecha, minutos, 'PAPELETA', int(papeleta_line),
+        motivo, user_id,
+    )
+    return minutos
+
+
+
 def registrar_sobretiempo(company, person, fecha, hora_inicio, hora_fin, motivo, user_id,
                           drive_file_id=None, local_sustento=None, nombre_sustento=None):
     minutos = calc_minutos_rango(hora_inicio, hora_fin)

@@ -411,7 +411,36 @@ def aprobar_paso_flujo_papeleta(
             if not _cerrar_papeleta(cursor, cia, per, line_i, user, status='A'):
                 conn.rollback()
                 return False, 'No se pudo cerrar la papeleta (ya no esta pendiente).', info
-            msg = 'Papeleta aprobada en todos los niveles.'
+            # Asuntos personales → horas deudoras en banco de horas
+            cursor.execute(
+                """
+                SELECT TipoCodigo, Modo, Fecha, HoraInicio, HoraFin, Horas,
+                       FechaInicio, FechaFin, Dias, Motivo
+                FROM dbo.CA_PapeletaSolicitud
+                WHERE Company = ? AND Person = ? AND Line = ?
+                """,
+                (cia, per, line_i),
+            )
+            prow = cursor.fetchone()
+            deuda_min = 0
+            if prow:
+                from banco_horas import abonar_deuda_papeleta_personal, minutos_a_horas_label
+                papeleta_row = {
+                    'TipoCodigo': prow[0], 'Modo': prow[1], 'Fecha': prow[2],
+                    'HoraInicio': prow[3], 'HoraFin': prow[4], 'Horas': prow[5],
+                    'FechaInicio': prow[6], 'FechaFin': prow[7], 'Dias': prow[8],
+                    'Motivo': prow[9],
+                }
+                deuda_min = abonar_deuda_papeleta_personal(
+                    cursor, cia, per, line_i, papeleta_row, user
+                )
+            if deuda_min > 0:
+                msg = (
+                    'Papeleta aprobada. Se registraron '
+                    f'{minutos_a_horas_label(deuda_min):.2f} h deudoras en el banco de horas.'
+                )
+            else:
+                msg = 'Papeleta aprobada en todos los niveles.'
             resumen = {
                 'codigo': 'APROBADO', 'label': 'Aprobado', 'chip': 'success',
                 'nivel_actual': info.get('resumen', {}).get('total_niveles'),
