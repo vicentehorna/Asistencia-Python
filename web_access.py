@@ -36,6 +36,12 @@ ENDPOINT_MENU_MAP = {
     'aprobar_vacaciones_nivel': 'aprobar_vacaciones',
     'rechazar_vacaciones_nivel': 'aprobar_vacaciones',
     'descargar_sustento_vacaciones': 'aprobar_vacaciones',
+    'solicitud_papeletas_page': 'solicitud_papeletas',
+    'aprobar_papeletas_page': 'aprobar_papeletas',
+    'aprobar_papeletas_lista': 'aprobar_papeletas',
+    'aprobar_papeletas_nivel': 'aprobar_papeletas',
+    'rechazar_papeletas_nivel': 'aprobar_papeletas',
+    'descargar_sustento_papeleta': 'aprobar_papeletas',
 }
 
 # Prefijos de API / path -> menu_code (el más específico gana por longitud)
@@ -77,11 +83,18 @@ PATH_PREFIX_MENU_MAP = {
     '/aprobar-vacaciones-nivel': 'aprobar_vacaciones',
     '/rechazar-vacaciones-nivel': 'aprobar_vacaciones',
     '/sustento-vacaciones': 'aprobar_vacaciones',
+    '/solicitud-papeletas': 'solicitud_papeletas',
+    '/aprobar-papeletas-lista': 'aprobar_papeletas',
+    '/aprobar-papeletas-nivel': 'aprobar_papeletas',
+    '/rechazar-papeletas-nivel': 'aprobar_papeletas',
+    '/aprobar-papeletas': 'aprobar_papeletas',
+    '/sustento-papeletas': 'aprobar_papeletas',
 }
 
 # Catálogo de menús de Asistencia (hm_quimica también tiene menús de Planillas).
 ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values()) | frozenset({
     'solicitud_vacaciones', 'detalle_vacaciones', 'saldo_vacaciones', 'aprobar_vacaciones',
+    'solicitud_papeletas', 'aprobar_papeletas',
 })
 
 ALWAYS_ALLOWED_ENDPOINTS = {
@@ -206,9 +219,11 @@ def first_allowed_endpoint(session_obj) -> str:
         return 'dashboard'
     preferred = [
         ('solicitud_vacaciones', 'solicitud_vacaciones_page'),
+        ('solicitud_papeletas', 'solicitud_papeletas_page'),
         ('detalle_vacaciones', 'reporte_vacaciones_detalle_page'),
         ('saldo_vacaciones', 'reporte_saldo_vacaciones_page'),
         ('aprobar_vacaciones', 'reporte_aprobar_vacaciones_page'),
+        ('aprobar_papeletas', 'aprobar_papeletas_page'),
         ('maestro_horarios', 'maestro_horarios'),
         ('gestion_marcas', 'gestion_marcas'),
         ('reporte_resumen', 'reporte_resumen'),

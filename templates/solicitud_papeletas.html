@@ -1,0 +1,241 @@
+{% extends "layout.html" %}
+
+{% block title %}Solicitud de papeletas{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-label-compact { font-size: 0.78rem; font-weight: 700; color: #64748b; margin-bottom: 0.35rem; }
+    .form-control, .form-select { min-height: 2.4rem; }
+    .table-solicitudes th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; }
+    .modo-block { display: none; }
+    .modo-block.is-active { display: block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h4 class="mb-0 fw-bold text-secondary">
+        <i class="bi bi-ticket-perforated me-2"></i>Solicitud de papeletas
+    </h4>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0 fw-bold text-secondary">Nueva papeleta</h5>
+            </div>
+            <div class="card-body pt-2">
+                <form method="post" id="frmPapeleta" enctype="multipart/form-data" novalidate>
+                    <div class="mb-2">
+                        <label for="tipo_codigo" class="form-label-compact">Tipo de papeleta</label>
+                        <select class="form-select form-select-sm" id="tipo_codigo" name="tipo_codigo" required>
+                            <option value="">Seleccione...</option>
+                            {% for t in tipos %}
+                            <option value="{{ t.Codigo }}"
+                                    data-modo="{{ t.ModoDefault }}"
+                                    data-sustento="{{ 1 if t.RequiereSustento else 0 }}">
+                                {{ t.Nombre }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label-compact d-block">Modo</label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="modo" id="modoH" value="H" checked>
+                            <label class="btn btn-outline-primary btn-sm" for="modoH">Por horas</label>
+                            <input type="radio" class="btn-check" name="modo" id="modoD" value="D">
+                            <label class="btn btn-outline-primary btn-sm" for="modoD">Por días</label>
+                        </div>
+                    </div>
+
+                    <div id="blockHoras" class="modo-block is-active">
+                        <div class="row g-2 mb-2">
+                            <div class="col-12">
+                                <label for="fecha" class="form-label-compact">Fecha</label>
+                                <input type="date" class="form-control form-control-sm" id="fecha" name="fecha" min="{{ fecha_min_hoy }}">
+                            </div>
+                            <div class="col-6">
+                                <label for="hora_inicio" class="form-label-compact">Hora inicio</label>
+                                <input type="time" class="form-control form-control-sm" id="hora_inicio" name="hora_inicio">
+                            </div>
+                            <div class="col-6">
+                                <label for="hora_fin" class="form-label-compact">Hora fin</label>
+                                <input type="time" class="form-control form-control-sm" id="hora_fin" name="hora_fin">
+                            </div>
+                            <div class="col-12">
+                                <div class="small text-muted">Horas solicitadas: <strong id="lblHoras">0.00</strong></div>
+                                <input type="hidden" name="horas" id="horas" value="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="blockDias" class="modo-block">
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label for="fecha_inicio" class="form-label-compact">Fecha inicio</label>
+                                <input type="date" class="form-control form-control-sm" id="fecha_inicio" name="fecha_inicio" min="{{ fecha_min_hoy }}">
+                            </div>
+                            <div class="col-6">
+                                <label for="fecha_fin" class="form-label-compact">Fecha fin</label>
+                                <input type="date" class="form-control form-control-sm" id="fecha_fin" name="fecha_fin" min="{{ fecha_min_hoy }}">
+                            </div>
+                            <div class="col-12">
+                                <div class="small text-muted">Días: <strong id="lblDias">0</strong></div>
+                                <input type="hidden" name="dias" id="dias" value="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label for="motivo" class="form-label-compact">Motivo / fundamento</label>
+                        <textarea class="form-control form-control-sm" id="motivo" name="motivo" rows="3" maxlength="500" required
+                                  placeholder="Detalle el fundamento de la papeleta..."></textarea>
+                    </div>
+
+                    <div class="mb-3" id="wrapSustento">
+                        <label for="sustento" class="form-label-compact">
+                            Adjuntar sustento (PDF)
+                            <span class="text-danger d-none" id="sustentoObligatorio">*</span>
+                        </label>
+                        <input type="file" class="form-control form-control-sm" id="sustento" name="sustento" accept=".pdf,application/pdf">
+                        <div class="form-text">Obligatorio para Atención Médica, Descanso corto y Luto/Paternidad.</div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary fw-semibold">
+                            <i class="bi bi-send-check me-1"></i>Enviar papeleta
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-0 pt-3">
+                <h5 class="mb-0 fw-bold text-secondary">
+                    <i class="bi bi-clock-history me-2"></i>Historial
+                </h5>
+            </div>
+            <div class="card-body pt-2">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle table-solicitudes mb-0">
+                        <thead>
+                            <tr>
+                                <th>Tipo</th>
+                                <th>Detalle</th>
+                                <th>Estado</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in historial %}
+                            <tr>
+                                <td>{{ row.tipo_nombre }}</td>
+                                <td class="small">{{ row.detalle }}</td>
+                                <td>
+                                    <span class="badge text-bg-{{ row.flujo_chip or 'secondary' }}"
+                                          title="{{ row.flujo_detalle or row.flujo_label }}">
+                                        {{ row.flujo_label or 'Pendiente' }}
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    {% if row.can_delete %}
+                                    <form method="post" class="d-inline"
+                                          onsubmit="return confirm('¿Eliminar esta papeleta?');">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="solicitud_id" value="{{ row.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                    <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-4">No hay papeletas registradas.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const tipo = document.getElementById('tipo_codigo');
+    const modoH = document.getElementById('modoH');
+    const modoD = document.getElementById('modoD');
+    const blockH = document.getElementById('blockHoras');
+    const blockD = document.getElementById('blockDias');
+    const sustentoReq = document.getElementById('sustentoObligatorio');
+    const fileInput = document.getElementById('sustento');
+
+    function setModo(m) {
+        const isH = m === 'H';
+        modoH.checked = isH;
+        modoD.checked = !isH;
+        blockH.classList.toggle('is-active', isH);
+        blockD.classList.toggle('is-active', !isH);
+    }
+
+    function syncTipo() {
+        const opt = tipo.options[tipo.selectedIndex];
+        if (!opt || !opt.value) return;
+        const modo = (opt.getAttribute('data-modo') || 'H').toUpperCase();
+        const req = opt.getAttribute('data-sustento') === '1';
+        setModo(modo);
+        sustentoReq.classList.toggle('d-none', !req);
+        fileInput.required = req;
+    }
+
+    function calcHoras() {
+        const a = document.getElementById('hora_inicio').value;
+        const b = document.getElementById('hora_fin').value;
+        let h = 0;
+        if (a && b) {
+            const [ah, am] = a.split(':').map(Number);
+            const [bh, bm] = b.split(':').map(Number);
+            h = ((bh * 60 + bm) - (ah * 60 + am)) / 60;
+            if (h < 0) h = 0;
+        }
+        document.getElementById('lblHoras').textContent = h.toFixed(2);
+        document.getElementById('horas').value = h.toFixed(2);
+    }
+
+    function calcDias() {
+        const a = document.getElementById('fecha_inicio').value;
+        const b = document.getElementById('fecha_fin').value;
+        let d = 0;
+        if (a && b) {
+            const d1 = new Date(a + 'T00:00:00');
+            const d2 = new Date(b + 'T00:00:00');
+            d = Math.floor((d2 - d1) / 86400000) + 1;
+            if (d < 0) d = 0;
+        }
+        document.getElementById('lblDias').textContent = String(d);
+        document.getElementById('dias').value = String(d);
+    }
+
+    tipo.addEventListener('change', syncTipo);
+    modoH.addEventListener('change', function () { if (modoH.checked) setModo('H'); });
+    modoD.addEventListener('change', function () { if (modoD.checked) setModo('D'); });
+    document.getElementById('hora_inicio').addEventListener('change', calcHoras);
+    document.getElementById('hora_fin').addEventListener('change', calcHoras);
+    document.getElementById('fecha_inicio').addEventListener('change', calcDias);
+    document.getElementById('fecha_fin').addEventListener('change', calcDias);
+});
+</script>
+{% endblock %}

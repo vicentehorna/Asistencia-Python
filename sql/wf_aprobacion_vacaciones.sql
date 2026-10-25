@@ -138,6 +138,7 @@ BEGIN
                 WHERE p.Company = PR_SolicitudVacaciones.Company
                   AND p.Person = PR_SolicitudVacaciones.Person
                   AND p.Line = PR_SolicitudVacaciones.Line
+                  AND p.TipoSolicitud = 'VACACIONES'
                   AND p.Estado = 'P'
             ),
             total_niveles = (
@@ -146,6 +147,7 @@ BEGIN
                 WHERE p.Company = PR_SolicitudVacaciones.Company
                   AND p.Person = PR_SolicitudVacaciones.Person
                   AND p.Line = PR_SolicitudVacaciones.Line
+                  AND p.TipoSolicitud = 'VACACIONES'
             ),
             estado_flujo = (
                 SELECT TOP 1
@@ -155,6 +157,7 @@ BEGIN
                             WHERE x.Company = PR_SolicitudVacaciones.Company
                               AND x.Person = PR_SolicitudVacaciones.Person
                               AND x.Line = PR_SolicitudVacaciones.Line
+                              AND x.TipoSolicitud = 'VACACIONES'
                               AND x.Estado = 'R'
                         ) THEN 'RECHAZADO'
                         WHEN NOT EXISTS (
@@ -162,18 +165,21 @@ BEGIN
                             WHERE x.Company = PR_SolicitudVacaciones.Company
                               AND x.Person = PR_SolicitudVacaciones.Person
                               AND x.Line = PR_SolicitudVacaciones.Line
+                              AND x.TipoSolicitud = 'VACACIONES'
                               AND x.Estado = 'P'
                         ) AND EXISTS (
                             SELECT 1 FROM dbo.WF_SolicitudPaso x
                             WHERE x.Company = PR_SolicitudVacaciones.Company
                               AND x.Person = PR_SolicitudVacaciones.Person
                               AND x.Line = PR_SolicitudVacaciones.Line
+                              AND x.TipoSolicitud = 'VACACIONES'
                         ) THEN 'APROBADO'
                         WHEN EXISTS (
                             SELECT 1 FROM dbo.WF_SolicitudPaso x
                             WHERE x.Company = PR_SolicitudVacaciones.Company
                               AND x.Person = PR_SolicitudVacaciones.Person
                               AND x.Line = PR_SolicitudVacaciones.Line
+                              AND x.TipoSolicitud = 'VACACIONES'
                               AND x.Estado = 'P'
                         ) THEN 'EN_APROBACION'
                         ELSE NULL
@@ -185,6 +191,7 @@ BEGIN
                 WHERE p.Company = PR_SolicitudVacaciones.Company
                   AND p.Person = PR_SolicitudVacaciones.Person
                   AND p.Line = PR_SolicitudVacaciones.Line
+                  AND p.TipoSolicitud = 'VACACIONES'
                   AND p.Estado = 'P'
                 ORDER BY p.Nivel
             ),
@@ -194,6 +201,7 @@ BEGIN
                 WHERE p.Company = PR_SolicitudVacaciones.Company
                   AND p.Person = PR_SolicitudVacaciones.Person
                   AND p.Line = PR_SolicitudVacaciones.Line
+                  AND p.TipoSolicitud = 'VACACIONES'
                   AND p.Estado = 'P'
                 ORDER BY p.Nivel
             ),
@@ -203,6 +211,7 @@ BEGIN
                 WHERE p.Company = PR_SolicitudVacaciones.Company
                   AND p.Person = PR_SolicitudVacaciones.Person
                   AND p.Line = PR_SolicitudVacaciones.Line
+                  AND p.TipoSolicitud = 'VACACIONES'
                   AND p.Estado = 'P'
                 ORDER BY p.Nivel
             ),
@@ -212,6 +221,7 @@ BEGIN
                 WHERE p.Company = PR_SolicitudVacaciones.Company
                   AND p.Person = PR_SolicitudVacaciones.Person
                   AND p.Line = PR_SolicitudVacaciones.Line
+                  AND p.TipoSolicitud = 'VACACIONES'
                   AND p.Estado = 'P'
                 ORDER BY p.Nivel
             )

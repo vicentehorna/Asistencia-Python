@@ -68,10 +68,22 @@ from database import (
 from google_drive import (
     carpeta_sustento_vacaciones_desde_env,
     nombre_archivo_sustento_vacaciones,
+    nombre_archivo_sustento_papeleta,
     subir_pdf_sustento_drive,
     descargar_archivo_drive,
     mensaje_error_drive_para_usuario,
     codigo_error_drive_para_soporte,
+)
+from papeletas import (
+    listar_tipos_papeleta,
+    get_historial_papeletas,
+    registrar_papeleta,
+    eliminar_papeleta,
+    tipo_requiere_sustento,
+    drive_file_id_desde_comments,
+    obtener_drive_file_id_sustento_papeleta,
+    aprobar_paso_flujo_papeleta,
+    rechazar_paso_flujo_papeleta,
 )
 
 load_dotenv()
@@ -94,6 +106,8 @@ def _unauthorized_json_friendly():
         or path.startswith('/aprobar-vacaciones')
         or path.startswith('/rechazar-vacaciones')
         or path.startswith('/reporte_aprobar_vacaciones')
+        or path.startswith('/aprobar-papeletas')
+        or path.startswith('/rechazar-papeletas')
         or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     )
     if wants_json:
@@ -217,6 +231,9 @@ def ensure_and_enforce_web_access():
         '/rechazar-vacaciones-nivel',
         '/aprobar-vacaciones-con-sustento',
         '/reporte_aprobar_vacaciones',
+        '/aprobar-papeletas-lista',
+        '/aprobar-papeletas-nivel',
+        '/rechazar-papeletas-nivel',
     )
     if path.startswith(json_action_prefixes):
         return jsonify({"error": "No tiene permiso para esta opción."}), 403
@@ -1858,6 +1875,403 @@ def rechazar_vacaciones_nivel():
     except Exception as e:
         logging.exception('rechazar_vacaciones_nivel')
         return jsonify({'error': f'Error al rechazar: {e}'}), 500
+
+
+def _detalle_papeleta_row(row):
+    modo = str(row.get('Modo') or row.get('modo') or 'H').upper()
+    if modo == 'D':
+        fi = fecha_filter(row.get('FechaInicio') or row.get('fechainicio') or row.get('fecha_inicio'))
+        ff = fecha_filter(row.get('FechaFin') or row.get('fechafin') or row.get('fecha_fin'))
+        dias = row.get('Dias') if row.get('Dias') is not None else row.get('dias')
+        return f"{fi} → {ff} ({dias or 0} día(s))"
+    f = fecha_filter(row.get('Fecha') or row.get('fecha'))
+    hi = str(row.get('HoraInicio') or row.get('horainicio') or row.get('hora_inicio') or '')[:5]
+    hf = str(row.get('HoraFin') or row.get('horafin') or row.get('hora_fin') or '')[:5]
+    horas = row.get('Horas') if row.get('Horas') is not None else row.get('horas')
+    return f"{f} {hi}-{hf} ({horas or 0} h)"
+
+
+def _historial_papeletas_items(rows):
+    out = []
+    for r in rows or []:
+        flujo = r.get('flujo') or {}
+        status = str(r.get('status') or '').upper()
+        can_delete = status == 'P' and not any(
+            str(p.get('Estado') or '').upper() == 'A' for p in (r.get('pasos_flujo') or [])
+        )
+        out.append({
+            'id': r.get('Id'),
+            'tipo_nombre': r.get('TipoNombre') or r.get('TipoCodigo') or '',
+            'detalle': _detalle_papeleta_row(r),
+            'flujo_label': flujo.get('label') or status,
+            'flujo_chip': flujo.get('chip') or 'secondary',
+            'flujo_detalle': flujo.get('detalle') or '',
+            'can_delete': can_delete,
+        })
+    return out
+
+
+@app.route('/solicitud-papeletas', methods=['GET', 'POST'])
+@login_required
+def solicitud_papeletas_page():
+    ensure_user_session()
+    company, person = _vacaciones_company_person_solicitud()
+    hoy_peru = fecha_hoy_peru()
+    fecha_min_hoy = hoy_peru.strftime('%Y-%m-%d')
+    tipos = listar_tipos_papeleta()
+
+    if not person:
+        flash(
+            'Su usuario no tiene un trabajador asociado. '
+            'La solicitud de papeletas requiere Person en sesión.',
+            'warning',
+        )
+
+    if request.method == 'POST' and request.form.get('action') == 'delete':
+        solicitud_id = request.form.get('solicitud_id')
+        if not company or not person:
+            flash('No se pudo identificar su usuario. Vuelva a iniciar sesión.', 'error')
+        elif not solicitud_id:
+            flash('Solicitud no válida.', 'warning')
+        elif eliminar_papeleta(company, person, solicitud_id):
+            flash('Papeleta eliminada correctamente.', 'success')
+        else:
+            flash('No se pudo eliminar (solo pendientes sin aprobación parcial).', 'warning')
+        return redirect(url_for('solicitud_papeletas_page'))
+
+    if request.method == 'POST' and request.form.get('action') != 'delete':
+        tipo_codigo = str(request.form.get('tipo_codigo') or '').strip().upper()
+        modo = str(request.form.get('modo') or 'H').strip().upper()[:1]
+        motivo = str(request.form.get('motivo') or '').strip()
+        archivo = request.files.get('sustento')
+        requiere = tipo_requiere_sustento(tipo_codigo) if tipo_codigo else False
+
+        if not company or not person:
+            flash('No se pudo identificar su usuario. Vuelva a iniciar sesión.', 'error')
+        elif not tipo_codigo:
+            flash('Seleccione el tipo de papeleta.', 'warning')
+        elif not motivo:
+            flash('Indique el motivo / fundamento.', 'warning')
+        elif requiere and (not archivo or not archivo.filename):
+            flash('Este tipo de papeleta requiere adjuntar sustento PDF.', 'warning')
+        else:
+            drive_file_id = None
+            nombre_sustento = None
+            ok_val = True
+            fecha = hora_inicio = hora_fin = horas = None
+            fecha_inicio = fecha_fin = dias = None
+
+            if modo == 'D':
+                fecha_inicio = str(request.form.get('fecha_inicio') or '').strip()
+                fecha_fin = str(request.form.get('fecha_fin') or '').strip()
+                ok_fechas, msg_fechas = _validar_fechas_solicitud_vacaciones(fecha_inicio, fecha_fin)
+                if not ok_fechas:
+                    flash(msg_fechas, 'warning')
+                    ok_val = False
+                else:
+                    dias = _days_between_calendar(fecha_inicio, fecha_fin)
+                    if dias <= 0:
+                        flash('El rango de fechas no es válido.', 'warning')
+                        ok_val = False
+            else:
+                modo = 'H'
+                fecha = str(request.form.get('fecha') or '').strip()
+                hora_inicio = str(request.form.get('hora_inicio') or '').strip()
+                hora_fin = str(request.form.get('hora_fin') or '').strip()
+                try:
+                    horas = float(request.form.get('horas') or 0)
+                except (TypeError, ValueError):
+                    horas = 0
+                if not fecha or not hora_inicio or not hora_fin:
+                    flash('Complete fecha y horario.', 'warning')
+                    ok_val = False
+                else:
+                    try:
+                        d_fecha = datetime.strptime(fecha, '%Y-%m-%d').date()
+                        if d_fecha < hoy_peru.date():
+                            flash('La fecha no puede ser anterior a hoy.', 'warning')
+                            ok_val = False
+                    except ValueError:
+                        flash('Fecha no válida.', 'warning')
+                        ok_val = False
+                    if ok_val and horas <= 0:
+                        flash('La hora fin debe ser posterior a la hora inicio.', 'warning')
+                        ok_val = False
+
+            if ok_val and archivo and archivo.filename:
+                nombre_orig = str(archivo.filename or '').strip().lower()
+                if not nombre_orig.endswith('.pdf'):
+                    flash('El sustento debe ser un archivo PDF.', 'warning')
+                    ok_val = False
+                else:
+                    carpeta_info = carpeta_sustento_vacaciones_desde_env()
+                    folder_id = carpeta_info.get('folder_id')
+                    if not folder_id:
+                        flash(
+                            'No hay carpeta de Drive configurada para sustentos '
+                            '(GOOGLE_DRIVE_FOLDER_SUSTENTO_VACACIONES).',
+                            'error',
+                        )
+                        ok_val = False
+                    else:
+                        try:
+                            nombre_sustento = nombre_archivo_sustento_papeleta(
+                                person, tipo_codigo, 'tmp'
+                            )
+                            try:
+                                archivo.stream.seek(0)
+                            except Exception:
+                                pass
+                            drive_file_id = subir_pdf_sustento_drive(
+                                folder_id, nombre_sustento, archivo.stream, app_root=app.root_path
+                            )
+                        except Exception as e:
+                            logging.exception('upload sustento papeleta')
+                            flash(mensaje_error_drive_para_usuario(e), 'error')
+                            ok_val = False
+
+            if ok_val:
+                ok, line = registrar_papeleta(
+                    company=company,
+                    person=person,
+                    tipo_codigo=tipo_codigo,
+                    modo=modo,
+                    motivo=motivo,
+                    user_id=current_user.id,
+                    fecha=fecha,
+                    hora_inicio=hora_inicio,
+                    hora_fin=hora_fin,
+                    horas=horas,
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                    dias=dias,
+                    drive_file_id=drive_file_id,
+                    nombre_sustento=nombre_sustento,
+                )
+                if ok:
+                    flash('Papeleta registrada correctamente.', 'success')
+                    return redirect(url_for('solicitud_papeletas_page'))
+                flash('No se pudo registrar la papeleta. Intente nuevamente.', 'error')
+
+    historial_rows = get_historial_papeletas(company, person) if company and person else []
+    historial = _historial_papeletas_items(historial_rows)
+    return render_template(
+        'solicitud_papeletas.html',
+        tipos=tipos,
+        historial=historial,
+        fecha_min_hoy=fecha_min_hoy,
+    )
+
+
+@app.route('/aprobar-papeletas')
+@login_required
+def aprobar_papeletas_page():
+    ensure_user_session()
+    return render_template('aprobar_papeletas.html')
+
+
+@app.route('/aprobar-papeletas-lista', methods=['POST'])
+@login_required
+def aprobar_papeletas_lista():
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = _reporte_compania_usuario_logueado()
+    dni = str(body.get('dni') or '').strip()
+    if not cia:
+        return jsonify({'error': 'No se pudo identificar la compañía del usuario.'}), 400
+    actor = _actor_flujo_vacaciones_ctx()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_ca_aprobarpapeletas_web @cia=?, @person=?, @dni=?',
+            (cia, '0', dni),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        out = []
+        for r in rows:
+            status_code = str(r.get('status') or '').strip().upper() or 'P'
+            try:
+                sid_int = int(r.get('id')) if r.get('id') is not None else None
+            except (TypeError, ValueError):
+                sid_int = None
+            person_row = str(r.get('person') or '').strip()
+            flujo_label = status_code
+            flujo_chip = 'secondary'
+            flujo_detalle = str(r.get('descripcion_nivel') or r.get('estado_flujo') or '').strip()
+            can_approve = can_reject = False
+            if sid_int is not None and person_row and status_code == 'P':
+                from database import resolver_accion_flujo
+                accion = resolver_accion_flujo(
+                    cia, person_row, sid_int,
+                    actor['person_actor'], actor['profilecode'],
+                    menus=actor['menus'],
+                    unrestricted=actor['unrestricted'],
+                    web_admin=actor['web_admin'],
+                    approval_userid=str(getattr(current_user, 'id', '') or ''),
+                    tipo_solicitud='PAPELETA',
+                )
+                resumen = accion.get('resumen') or {}
+                flujo_label = resumen.get('label') or flujo_detalle or 'Pendiente'
+                flujo_chip = resumen.get('chip') or 'warning'
+                flujo_detalle = resumen.get('detalle') or flujo_detalle
+                can_approve = bool(accion.get('can_approve'))
+                can_reject = bool(accion.get('can_reject'))
+            elif status_code == 'A':
+                flujo_label, flujo_chip, flujo_detalle = 'Aprobado', 'success', 'Aprobado'
+            elif status_code == 'R':
+                flujo_label, flujo_chip, flujo_detalle = 'Rechazado', 'danger', 'Rechazado'
+
+            tiene_sustento = bool(drive_file_id_desde_comments(r.get('comments')))
+            out.append({
+                'id': sid_int,
+                'person': person_row,
+                'name': str(r.get('name') or '').strip(),
+                'tipo_nombre': str(r.get('tiponombre') or r.get('tipocodigo') or '').strip(),
+                'detalle': _detalle_papeleta_row(r),
+                'status': status_code,
+                'flujo_label': flujo_label,
+                'flujo_chip': flujo_chip,
+                'flujo_detalle': flujo_detalle,
+                'can_approve': can_approve,
+                'can_reject': can_reject,
+                'can_download': tiene_sustento,
+            })
+        return jsonify({'rows': out})
+    except Exception as e:
+        logging.exception('aprobar_papeletas_lista')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/aprobar-papeletas-nivel', methods=['POST'])
+@login_required
+def aprobar_papeletas_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
+        person_dni = str(
+            body.get('person') or body.get('person_dni')
+            or request.form.get('person') or request.form.get('person_dni') or ''
+        ).strip()
+        observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni:
+            return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = aprobar_paso_flujo_papeleta(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion or None,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('aprobar_papeletas_nivel')
+        return jsonify({'error': f'Error al aprobar: {e}'}), 500
+
+
+@app.route('/rechazar-papeletas-nivel', methods=['POST'])
+@login_required
+def rechazar_papeletas_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id') or request.form.get('solicitud_id')
+        person_dni = str(
+            body.get('person') or body.get('person_dni')
+            or request.form.get('person') or request.form.get('person_dni') or ''
+        ).strip()
+        observacion = str(body.get('observacion') or request.form.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni:
+            return jsonify({'error': 'Solicitud o trabajador no indicado.'}), 400
+        if not observacion:
+            return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = rechazar_paso_flujo_papeleta(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('rechazar_papeletas_nivel')
+        return jsonify({'error': f'Error al rechazar: {e}'}), 500
+
+
+@app.route('/sustento-papeletas/descargar')
+@login_required
+def descargar_sustento_papeleta():
+    ensure_user_session()
+    json_errors = request.headers.get('X-Fetch-Descarga') == '1'
+    solicitud_id = request.args.get('solicitud_id')
+    person = str(request.args.get('person') or '').strip()
+    company = _reporte_compania_usuario_logueado()
+    if not solicitud_id or not company or not person:
+        if json_errors:
+            return jsonify({'error': 'Solicitud o compañía no indicada.'}), 400
+        flash('Solicitud o compañía no indicada.', 'error')
+        return redirect(url_for('aprobar_papeletas_page'))
+    drive_id = obtener_drive_file_id_sustento_papeleta(company, person, solicitud_id)
+    if not drive_id:
+        if json_errors:
+            return jsonify({'error': 'No hay sustento PDF registrado.'}), 404
+        flash('No hay sustento PDF registrado.', 'error')
+        return redirect(url_for('aprobar_papeletas_page'))
+    try:
+        archivo_io, nombre_archivo, mime = descargar_archivo_drive(
+            drive_id, app_root=app.root_path
+        )
+    except Exception as e:
+        logging.exception('descargar_sustento_papeleta')
+        msg = mensaje_error_drive_para_usuario(e)
+        if json_errors:
+            return jsonify({'error': msg}), 502
+        flash(msg, 'error')
+        return redirect(url_for('aprobar_papeletas_page'))
+    return send_file(
+        archivo_io,
+        as_attachment=True,
+        download_name=nombre_archivo,
+        mimetype=mime,
+    )
 
 
 @app.route('/perfiles-acceso')

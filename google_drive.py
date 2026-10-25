@@ -41,6 +41,13 @@ def nombre_archivo_sustento_vacaciones(dni, periodo):
     return f'Sustento_Vacaciones_{dni_s}_{per_s}.pdf'
 
 
+def nombre_archivo_sustento_papeleta(dni, tipo_codigo, line):
+    dni_s = re.sub(r'[^\w\-]+', '_', str(dni or '').strip())[:40] or 'SIN_DNI'
+    tipo_s = re.sub(r'[^\w\-]+', '_', str(tipo_codigo or '').strip())[:30] or 'PAPELETA'
+    line_s = re.sub(r'[^\w\-]+', '_', str(line or '').strip())[:12] or '0'
+    return f'Sustento_Papeleta_{dni_s}_{tipo_s}_{line_s}.pdf'
+
+
 def _drive_http_timeout_seconds():
     try:
         return max(30, int(os.getenv('GOOGLE_HTTP_TIMEOUT', '180')))

@@ -2939,22 +2939,41 @@ def eliminar_solicitud_vacaciones(company, person, solicitud_id):
         pk = _solicitud_vacaciones_pk_column(cursor)
         # Solo si ningún nivel aprobó aún
         if _wf_tablas_listas(cursor):
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
-                WHERE Company = ? AND Person = ? AND Line = ? AND Estado = 'A'
-                """,
-                (cia, per, sid),
-            )
+            if _wf_tiene_tipo_solicitud(cursor):
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
+                    WHERE Company = ? AND Person = ? AND Line = ?
+                      AND TipoSolicitud = 'VACACIONES' AND Estado = 'A'
+                    """,
+                    (cia, per, sid),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
+                    WHERE Company = ? AND Person = ? AND Line = ? AND Estado = 'A'
+                    """,
+                    (cia, per, sid),
+                )
             if int((cursor.fetchone() or [0])[0] or 0) > 0:
                 return False
-            cursor.execute(
-                """
-                DELETE FROM dbo.WF_SolicitudPaso
-                WHERE Company = ? AND Person = ? AND Line = ?
-                """,
-                (cia, per, sid),
-            )
+            if _wf_tiene_tipo_solicitud(cursor):
+                cursor.execute(
+                    """
+                    DELETE FROM dbo.WF_SolicitudPaso
+                    WHERE Company = ? AND Person = ? AND Line = ? AND TipoSolicitud = 'VACACIONES'
+                    """,
+                    (cia, per, sid),
+                )
+            else:
+                cursor.execute(
+                    """
+                    DELETE FROM dbo.WF_SolicitudPaso
+                    WHERE Company = ? AND Person = ? AND Line = ?
+                    """,
+                    (cia, per, sid),
+                )
         cursor.execute(
             f"""
             DELETE FROM PR_SolicitudVacaciones
@@ -3377,7 +3396,13 @@ def _wf_cadena_centros_costo(cursor, company, cost_center_inicial):
     return cadena
 
 
-def _wf_resolver_pasos_materializados(cursor, company, person):
+def _wf_tiene_tipo_solicitud(cursor):
+    cursor.execute("SELECT COL_LENGTH('dbo.WF_SolicitudPaso', 'TipoSolicitud')")
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _wf_resolver_pasos_materializados(cursor, company, person, tipo_solicitud='VACACIONES'):
     """
     Arma la lista de pasos a insertar:
     - JEFE_CC_CADENA → un paso por cada CC con boss (deduplicado)
@@ -3386,6 +3411,7 @@ def _wf_resolver_pasos_materializados(cursor, company, person):
     """
     cia = str(company or '').strip()
     per = str(person or '').strip()
+    tipo_s = str(tipo_solicitud or 'VACACIONES').strip().upper() or 'VACACIONES'
     cursor.execute(
         """
         SELECT TOP 1
@@ -3400,11 +3426,45 @@ def _wf_resolver_pasos_materializados(cursor, company, person):
     cost_center = str(emp[0] or '').strip() if emp and emp[0] else ''
     boss_person_fallback = str(emp[1] or '').strip() if emp and emp[1] else ''
 
-    config = _wf_leer_config(cursor, cia, 'VACACIONES')
+    # Si el empleado no está en la misma Company de la solicitud, buscar por Person.
+    if not cost_center:
+        cursor.execute(
+            """
+            SELECT TOP 1
+                NULLIF(LTRIM(RTRIM(CostCenter)), ''),
+                NULLIF(LTRIM(RTRIM(BossPerson)), ''),
+                Company
+            FROM dbo.PR_Employee
+            WHERE Person = ?
+            ORDER BY CASE WHEN Company = ? THEN 0 ELSE 1 END
+            """,
+            (per, cia),
+        )
+        emp2 = cursor.fetchone()
+        if emp2:
+            cost_center = str(emp2[0] or '').strip()
+            boss_person_fallback = str(emp2[1] or '').strip() if emp2[1] else boss_person_fallback
+            if cost_center and str(emp2[2] or '').strip() != cia:
+                # Resolver boss usando el Company real del empleado
+                cia_emp = str(emp2[2] or '').strip()
+                config = _wf_leer_config(cursor, cia, tipo_s)
+                # reasignar cia solo para cadena CC
+                return _wf_armar_pasos_desde_config(
+                    cursor, cia_emp, per, cost_center, boss_person_fallback, config
+                )
+
+    config = _wf_leer_config(cursor, cia, tipo_s)
+    return _wf_armar_pasos_desde_config(
+        cursor, cia, per, cost_center, boss_person_fallback, config
+    )
+
+
+def _wf_armar_pasos_desde_config(cursor, company, person, cost_center, boss_person_fallback, config):
+    cia = str(company or '').strip()
+    per = str(person or '').strip()
     pasos = []
     nivel = 0
     jefes_ya = set()
-
     for cfg in config:
         tipo = str(cfg.get('TipoAprobador') or '').upper()
         if tipo == 'JEFE_CC_CADENA':
@@ -3451,7 +3511,6 @@ def _wf_resolver_pasos_materializados(cursor, company, person):
                 'Descripcion': desc,
             })
     if not pasos:
-        # Último recurso: solo RRHH (comportamiento previo de 1 nivel)
         pasos.append({
             'Nivel': 1,
             'TipoAprobador': 'ROL_PERFIL',
@@ -3464,8 +3523,8 @@ def _wf_resolver_pasos_materializados(cursor, company, person):
     return pasos
 
 
-def crear_pasos_flujo_solicitud_vacaciones(company, person, line, cursor=None):
-    """Inserta WF_SolicitudPaso para una solicitud nueva. Idempotente."""
+def crear_pasos_flujo_solicitud(company, person, line, tipo_solicitud='VACACIONES', cursor=None):
+    """Inserta WF_SolicitudPaso tipado. Idempotente."""
     own_conn = cursor is None
     conn = None
     try:
@@ -3477,37 +3536,65 @@ def crear_pasos_flujo_solicitud_vacaciones(company, person, line, cursor=None):
         cia = str(company or '').strip()
         per = str(person or '').strip()
         line_i = int(line)
-        cursor.execute(
-            """
-            SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
-            WHERE Company = ? AND Person = ? AND Line = ?
-            """,
-            (cia, per, line_i),
-        )
-        if int((cursor.fetchone() or [0])[0] or 0) > 0:
-            return True
-        pasos = _wf_resolver_pasos_materializados(cursor, cia, per)
-        for p in pasos:
+        tipo_s = str(tipo_solicitud or 'VACACIONES').strip().upper() or 'VACACIONES'
+        has_tipo = _wf_tiene_tipo_solicitud(cursor)
+        if has_tipo:
             cursor.execute(
                 """
-                INSERT INTO dbo.WF_SolicitudPaso (
-                    Company, Person, Line, Nivel, TipoAprobador,
-                    CostCenter, CostCenterCode, AprobadorPerson, ProfileCode,
-                    Descripcion, Estado
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'P')
+                SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
+                WHERE Company = ? AND Person = ? AND Line = ? AND TipoSolicitud = ?
                 """,
-                (
-                    cia, per, line_i, int(p['Nivel']), p['TipoAprobador'],
-                    p.get('CostCenter'), p.get('CostCenterCode'),
-                    p.get('AprobadorPerson'), p.get('ProfileCode'),
-                    (p.get('Descripcion') or '')[:120],
-                ),
+                (cia, per, line_i, tipo_s),
             )
+        else:
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM dbo.WF_SolicitudPaso
+                WHERE Company = ? AND Person = ? AND Line = ?
+                """,
+                (cia, per, line_i),
+            )
+        if int((cursor.fetchone() or [0])[0] or 0) > 0:
+            return True
+        pasos = _wf_resolver_pasos_materializados(cursor, cia, per, tipo_s)
+        for p in pasos:
+            if has_tipo:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.WF_SolicitudPaso (
+                        Company, Person, Line, Nivel, TipoAprobador,
+                        CostCenter, CostCenterCode, AprobadorPerson, ProfileCode,
+                        Descripcion, Estado, TipoSolicitud
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'P', ?)
+                    """,
+                    (
+                        cia, per, line_i, int(p['Nivel']), p['TipoAprobador'],
+                        p.get('CostCenter'), p.get('CostCenterCode'),
+                        p.get('AprobadorPerson'), p.get('ProfileCode'),
+                        (p.get('Descripcion') or '')[:120], tipo_s,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.WF_SolicitudPaso (
+                        Company, Person, Line, Nivel, TipoAprobador,
+                        CostCenter, CostCenterCode, AprobadorPerson, ProfileCode,
+                        Descripcion, Estado
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'P')
+                    """,
+                    (
+                        cia, per, line_i, int(p['Nivel']), p['TipoAprobador'],
+                        p.get('CostCenter'), p.get('CostCenterCode'),
+                        p.get('AprobadorPerson'), p.get('ProfileCode'),
+                        (p.get('Descripcion') or '')[:120],
+                    ),
+                )
         if own_conn:
             conn.commit()
         return True
     except Exception as e:
-        print(f'Error en crear_pasos_flujo_solicitud_vacaciones: {e}')
+        print(f'Error en crear_pasos_flujo_solicitud: {e}')
         if own_conn and conn:
             try:
                 conn.rollback()
@@ -3522,36 +3609,57 @@ def crear_pasos_flujo_solicitud_vacaciones(company, person, line, cursor=None):
                 pass
 
 
+def crear_pasos_flujo_solicitud_vacaciones(company, person, line, cursor=None):
+    return crear_pasos_flujo_solicitud(company, person, line, 'VACACIONES', cursor=cursor)
+
+
+def asegurar_pasos_flujo_solicitud(company, person, line, tipo_solicitud='VACACIONES'):
+    return crear_pasos_flujo_solicitud(company, person, line, tipo_solicitud)
+
+
 def asegurar_pasos_flujo_solicitud_vacaciones(company, person, line):
-    """Crea pasos si la solicitud P aún no los tiene (migración suave)."""
-    return crear_pasos_flujo_solicitud_vacaciones(company, person, line)
+    return asegurar_pasos_flujo_solicitud(company, person, line, 'VACACIONES')
 
 
-def get_pasos_flujo_solicitud_vacaciones(company, person, line):
+def get_pasos_flujo_solicitud(company, person, line, tipo_solicitud='VACACIONES'):
     conn = None
     try:
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
         if not _wf_tablas_listas(cursor):
             return []
-        cursor.execute(
-            """
-            SELECT Nivel, TipoAprobador, CostCenter, CostCenterCode,
-                   AprobadorPerson, ProfileCode, Descripcion, Estado,
-                   UserID, FechaRespuesta, Observacion
-            FROM dbo.WF_SolicitudPaso
-            WHERE Company = ? AND Person = ? AND Line = ?
-            ORDER BY Nivel
-            """,
-            (str(company or '').strip(), str(person or '').strip(), int(line)),
-        )
+        tipo_s = str(tipo_solicitud or 'VACACIONES').strip().upper() or 'VACACIONES'
+        if _wf_tiene_tipo_solicitud(cursor):
+            cursor.execute(
+                """
+                SELECT Nivel, TipoAprobador, CostCenter, CostCenterCode,
+                       AprobadorPerson, ProfileCode, Descripcion, Estado,
+                       UserID, FechaRespuesta, Observacion
+                FROM dbo.WF_SolicitudPaso
+                WHERE Company = ? AND Person = ? AND Line = ? AND TipoSolicitud = ?
+                ORDER BY Nivel
+                """,
+                (str(company or '').strip(), str(person or '').strip(), int(line), tipo_s),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT Nivel, TipoAprobador, CostCenter, CostCenterCode,
+                       AprobadorPerson, ProfileCode, Descripcion, Estado,
+                       UserID, FechaRespuesta, Observacion
+                FROM dbo.WF_SolicitudPaso
+                WHERE Company = ? AND Person = ? AND Line = ?
+                ORDER BY Nivel
+                """,
+                (str(company or '').strip(), str(person or '').strip(), int(line)),
+            )
         cols = [c[0] for c in cursor.description]
         rows = [dict(zip(cols, r)) for r in cursor.fetchall()]
         cursor.close()
         conn.close()
         return rows
     except Exception as e:
-        print(f'Error en get_pasos_flujo_solicitud_vacaciones: {e}')
+        print(f'Error en get_pasos_flujo_solicitud: {e}')
         return []
     finally:
         if conn:
@@ -3559,6 +3667,10 @@ def get_pasos_flujo_solicitud_vacaciones(company, person, line):
                 conn.close()
             except Exception:
                 pass
+
+
+def get_pasos_flujo_solicitud_vacaciones(company, person, line):
+    return get_pasos_flujo_solicitud(company, person, line, 'VACACIONES')
 
 
 def resumir_estado_flujo_vacaciones(pasos, status_solicitud=None):
@@ -3651,14 +3763,13 @@ def usuario_puede_actuar_paso_vacaciones(paso, person_actor, profilecode, menus=
     return False
 
 
-def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_actor, profilecode,
-                                     menus=None, unrestricted=False, web_admin=False,
-                                     approval_userid=None):
-    """
-    Devuelve dict con paso pendiente y flags can_approve / can_reject / requires_sustento.
-    """
-    asegurar_pasos_flujo_solicitud_vacaciones(company, person_solicitud, line)
-    pasos = get_pasos_flujo_solicitud_vacaciones(company, person_solicitud, line)
+def resolver_accion_flujo(company, person_solicitud, line, person_actor, profilecode,
+                          menus=None, unrestricted=False, web_admin=False,
+                          approval_userid=None, tipo_solicitud='VACACIONES'):
+    """Devuelve dict con paso pendiente y flags can_approve / can_reject."""
+    tipo_s = str(tipo_solicitud or 'VACACIONES').strip().upper() or 'VACACIONES'
+    asegurar_pasos_flujo_solicitud(company, person_solicitud, line, tipo_s)
+    pasos = get_pasos_flujo_solicitud(company, person_solicitud, line, tipo_s)
     resumen = resumir_estado_flujo_vacaciones(pasos)
     pend = next((p for p in pasos if str(p.get('Estado') or '').upper() == 'P'), None)
     can = usuario_puede_actuar_paso_vacaciones(
@@ -3674,43 +3785,78 @@ def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_act
         'paso_pendiente': pend,
         'can_approve': can,
         'can_reject': can,
-        # Sustento PDF opcional en nivel final RRHH (demo sin impacto planilla).
         'requires_sustento': False,
-        'can_upload_sustento': bool(can and es_final and es_rrhh),
+        'can_upload_sustento': bool(can and es_final and es_rrhh and tipo_s == 'VACACIONES'),
         'es_nivel_final': es_final,
+        'tipo_solicitud': tipo_s,
     }
 
 
-def _wf_marcar_paso(cursor, company, person, line, nivel, estado, user_id, observacion=None):
+def resolver_accion_flujo_vacaciones(company, person_solicitud, line, person_actor, profilecode,
+                                     menus=None, unrestricted=False, web_admin=False,
+                                     approval_userid=None):
+    return resolver_accion_flujo(
+        company, person_solicitud, line, person_actor, profilecode,
+        menus=menus, unrestricted=unrestricted, web_admin=web_admin,
+        approval_userid=approval_userid, tipo_solicitud='VACACIONES',
+    )
+
+
+def _wf_marcar_paso(cursor, company, person, line, nivel, estado, user_id, observacion=None,
+                    tipo_solicitud='VACACIONES'):
     """Marca el paso. No confiar en cursor.rowcount (pyodbc/SQL Server + triggers)."""
     cia = str(company or '').strip()
     per = str(person or '').strip()
     line_i = int(line)
     nivel_i = int(nivel)
     est = str(estado).upper()[:1]
-    cursor.execute(
-        """
-        UPDATE dbo.WF_SolicitudPaso
-        SET Estado = ?,
-            UserID = ?,
-            FechaRespuesta = GETDATE(),
-            Observacion = ?
-        WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ? AND Estado = 'P'
-        """,
-        (
-            est,
-            str(user_id or '').strip()[:20],
-            (observacion or '')[:500] or None,
-            cia, per, line_i, nivel_i,
-        ),
-    )
-    cursor.execute(
-        """
-        SELECT Estado FROM dbo.WF_SolicitudPaso
-        WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ?
-        """,
-        (cia, per, line_i, nivel_i),
-    )
+    tipo_s = str(tipo_solicitud or 'VACACIONES').strip().upper() or 'VACACIONES'
+    has_tipo = _wf_tiene_tipo_solicitud(cursor)
+    if has_tipo:
+        cursor.execute(
+            """
+            UPDATE dbo.WF_SolicitudPaso
+            SET Estado = ?,
+                UserID = ?,
+                FechaRespuesta = GETDATE(),
+                Observacion = ?
+            WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ?
+              AND TipoSolicitud = ? AND Estado = 'P'
+            """,
+            (
+                est, str(user_id or '').strip()[:20], (observacion or '')[:500] or None,
+                cia, per, line_i, nivel_i, tipo_s,
+            ),
+        )
+        cursor.execute(
+            """
+            SELECT Estado FROM dbo.WF_SolicitudPaso
+            WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ? AND TipoSolicitud = ?
+            """,
+            (cia, per, line_i, nivel_i, tipo_s),
+        )
+    else:
+        cursor.execute(
+            """
+            UPDATE dbo.WF_SolicitudPaso
+            SET Estado = ?,
+                UserID = ?,
+                FechaRespuesta = GETDATE(),
+                Observacion = ?
+            WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ? AND Estado = 'P'
+            """,
+            (
+                est, str(user_id or '').strip()[:20], (observacion or '')[:500] or None,
+                cia, per, line_i, nivel_i,
+            ),
+        )
+        cursor.execute(
+            """
+            SELECT Estado FROM dbo.WF_SolicitudPaso
+            WHERE Company = ? AND Person = ? AND Line = ? AND Nivel = ?
+            """,
+            (cia, per, line_i, nivel_i),
+        )
     row = cursor.fetchone()
     return bool(row) and str(row[0] or '').strip().upper() == est
 
@@ -3822,7 +3968,10 @@ def aprobar_paso_flujo_vacaciones(company, person, line, approval_user, person_a
         per = str(person or '').strip()
         line_i = int(line)
 
-        if not _wf_marcar_paso(cursor, cia, per, line_i, pend['Nivel'], 'A', user, observacion):
+        if not _wf_marcar_paso(
+            cursor, cia, per, line_i, pend['Nivel'], 'A', user, observacion,
+            tipo_solicitud='VACACIONES',
+        ):
             conn.rollback()
             return False, 'El paso ya fue resuelto por otro usuario.', info
 
@@ -3925,22 +4074,39 @@ def rechazar_paso_flujo_vacaciones(company, person, line, approval_user, person_
         per = str(person or '').strip()
         line_i = int(line)
 
-        if not _wf_marcar_paso(cursor, cia, per, line_i, pend['Nivel'], 'R', user, motivo):
+        if not _wf_marcar_paso(
+            cursor, cia, per, line_i, pend['Nivel'], 'R', user, motivo,
+            tipo_solicitud='VACACIONES',
+        ):
             conn.rollback()
             return False, 'El paso ya fue resuelto por otro usuario.', info
 
         # Cancelar restantes pendientes
-        cursor.execute(
-            """
-            UPDATE dbo.WF_SolicitudPaso
-            SET Estado = 'R',
-                UserID = ?,
-                FechaRespuesta = GETDATE(),
-                Observacion = ?
-            WHERE Company = ? AND Person = ? AND Line = ? AND Estado = 'P'
-            """,
-            (user, f'Cerrado por rechazo en nivel {pend.get("Nivel")}'[:500], cia, per, line_i),
-        )
+        if _wf_tiene_tipo_solicitud(cursor):
+            cursor.execute(
+                """
+                UPDATE dbo.WF_SolicitudPaso
+                SET Estado = 'R',
+                    UserID = ?,
+                    FechaRespuesta = GETDATE(),
+                    Observacion = ?
+                WHERE Company = ? AND Person = ? AND Line = ?
+                  AND TipoSolicitud = 'VACACIONES' AND Estado = 'P'
+                """,
+                (user, f'Cerrado por rechazo en nivel {pend.get("Nivel")}'[:500], cia, per, line_i),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE dbo.WF_SolicitudPaso
+                SET Estado = 'R',
+                    UserID = ?,
+                    FechaRespuesta = GETDATE(),
+                    Observacion = ?
+                WHERE Company = ? AND Person = ? AND Line = ? AND Estado = 'P'
+                """,
+                (user, f'Cerrado por rechazo en nivel {pend.get("Nivel")}'[:500], cia, per, line_i),
+            )
 
         if pk == 'Line':
             cursor.execute(
