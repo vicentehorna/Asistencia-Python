@@ -1,0 +1,296 @@
+{% extends "layout.html" %}
+
+{% block title %}Ficha de Datos{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-label-compact { font-size: 0.78rem; font-weight: 700; color: #64748b; margin-bottom: 0.35rem; }
+    .actual-box { background: #f8fafc; border-radius: .75rem; padding: .75rem 1rem; font-size: .85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h4 class="mb-1 fw-bold text-secondary">
+            <i class="bi bi-person-vcard me-2"></i>Ficha de Datos
+        </h4>
+        <div class="small text-muted">
+            {{ nombre_persona or '—' }} · Actualización con aprobación Jefe → RR.HH.
+        </div>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link {% if tab != 'educacion' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tabContacto" type="button">Contacto</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link {% if tab == 'educacion' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tabEducacion" type="button">Educación</button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade {% if tab != 'educacion' %}show active{% endif %}" id="tabContacto">
+        <div class="row g-3">
+            <div class="col-12 col-lg-5">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Datos actuales</h5>
+                    </div>
+                    <div class="card-body pt-2">
+                        <div class="actual-box">
+                            <div><strong>Celular:</strong> {{ contacto.sectelephone or '—' }}</div>
+                            <div><strong>Email:</strong> {{ contacto.email or '—' }}</div>
+                            <div><strong>Dirección:</strong> {{ contacto.address or '—' }}</div>
+                            <div><strong>Ubigeo:</strong> {{ contacto.ubigeo_texto or contacto.localite or '—' }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card border-0 shadow-sm mt-3">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h6 class="mb-0 fw-bold text-secondary">Solicitudes de contacto</h6>
+                    </div>
+                    <div class="card-body pt-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr><th>Detalle</th><th>Estado</th><th></th></tr></thead>
+                                <tbody>
+                                {% for r in hist_contacto %}
+                                <tr>
+                                    <td class="small">{{ r.detalle }}</td>
+                                    <td><span class="badge text-bg-{{ r.flujo_chip }}">{{ r.flujo_label }}</span></td>
+                                    <td class="text-end">
+                                        {% if r.can_delete %}
+                                        <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar?');">
+                                            <input type="hidden" name="action" value="delete_contacto">
+                                            <input type="hidden" name="solicitud_id" value="{{ r.id }}">
+                                            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="3" class="text-muted text-center py-3">Sin solicitudes.</td></tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-7">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Solicitar actualización de contacto</h5>
+                    </div>
+                    <div class="card-body pt-2">
+                        <form method="post">
+                            <input type="hidden" name="action" value="solicitud_contacto">
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="telefono">Celular / teléfono</label>
+                                    <input type="text" class="form-control form-control-sm" id="telefono" name="telefono"
+                                           maxlength="15" value="{{ contacto.sectelephone or '' }}">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="email">Email</label>
+                                    <input type="email" class="form-control form-control-sm" id="email" name="email"
+                                           maxlength="255" value="{{ contacto.email or '' }}">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label-compact" for="address">Dirección</label>
+                                    <input type="text" class="form-control form-control-sm" id="address" name="address"
+                                           maxlength="255" value="{{ contacto.address or '' }}">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label-compact" for="localite">Código ubigeo / localidad (opcional)</label>
+                                    <input type="text" class="form-control form-control-sm" id="localite" name="localite"
+                                           maxlength="20" value="{{ contacto.localite or '' }}"
+                                           placeholder="Ej. código Softland de distrito">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label-compact" for="motivo_c">Motivo / observación</label>
+                                    <textarea class="form-control form-control-sm" id="motivo_c" name="motivo" rows="2" maxlength="500"></textarea>
+                                </div>
+                                <div class="col-12 d-grid">
+                                    <button type="submit" class="btn btn-primary btn-sm fw-semibold">
+                                        <i class="bi bi-send me-1"></i>Enviar solicitud de contacto
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade {% if tab == 'educacion' %}show active{% endif %}" id="tabEducacion">
+        <div class="row g-3">
+            <div class="col-12 col-lg-5">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Datos actuales</h5>
+                    </div>
+                    <div class="card-body pt-2">
+                        <div class="actual-box">
+                            <div><strong>Nivel:</strong> {{ educacion.instructionlevel_desc or educacion.instructionlevel or '—' }}</div>
+                            <div><strong>Institución:</strong> {{ educacion.institucion_desc or educacion.costcenter1 or '—' }}</div>
+                            <div><strong>Carrera:</strong> {{ educacion.carrera_desc or educacion.costcenter2 or '—' }}</div>
+                            <div><strong>Año egreso:</strong> {{ educacion.anio_egreso or '—' }}</div>
+                            <div><strong>Especialidad:</strong> {{ educacion.specialty or '—' }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card border-0 shadow-sm mt-3">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h6 class="mb-0 fw-bold text-secondary">Solicitudes de educación</h6>
+                    </div>
+                    <div class="card-body pt-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr><th>Detalle</th><th>Estado</th><th></th></tr></thead>
+                                <tbody>
+                                {% for r in hist_educacion %}
+                                <tr>
+                                    <td class="small">{{ r.detalle }}</td>
+                                    <td><span class="badge text-bg-{{ r.flujo_chip }}">{{ r.flujo_label }}</span></td>
+                                    <td class="text-end">
+                                        {% if r.can_delete %}
+                                        <form method="post" class="d-inline" onsubmit="return confirm('¿Eliminar?');">
+                                            <input type="hidden" name="action" value="delete_educacion">
+                                            <input type="hidden" name="solicitud_id" value="{{ r.id }}">
+                                            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="3" class="text-muted text-center py-3">Sin solicitudes.</td></tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-7">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white border-0 pt-3">
+                        <h5 class="mb-0 fw-bold text-secondary">Solicitar actualización de educación</h5>
+                    </div>
+                    <div class="card-body pt-2">
+                        <form method="post" id="frmEducacion">
+                            <input type="hidden" name="action" value="solicitud_educacion">
+                            <input type="hidden" name="tab" value="educacion">
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="instructionlevel">Nivel instrucción</label>
+                                    <select class="form-select form-select-sm" id="instructionlevel" name="instructionlevel">
+                                        <option value="">Seleccione...</option>
+                                        {% for n in niveles %}
+                                        <option value="{{ n.id }}" {% if n.id == educacion.instructionlevel %}selected{% endif %}>{{ n.text }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="anio_egreso">Año egreso</label>
+                                    <input type="text" class="form-control form-control-sm" id="anio_egreso" name="anio_egreso"
+                                           maxlength="4" placeholder="Ej. 2018" value="{{ educacion.anio_egreso or '' }}">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="costcenter1">Institución</label>
+                                    <select class="form-select form-select-sm" id="costcenter1" name="costcenter1">
+                                        <option value="">Seleccione...</option>
+                                        {% for i in instituciones %}
+                                        <option value="{{ i.id }}" {% if i.id == educacion.costcenter1 %}selected{% endif %}>{{ i.text }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="costcenter2">Carrera</label>
+                                    <select class="form-select form-select-sm" id="costcenter2" name="costcenter2">
+                                        <option value="">Seleccione institución primero...</option>
+                                        {% for c in carreras %}
+                                        <option value="{{ c.id }}" {% if c.id == educacion.costcenter2 %}selected{% endif %}>{{ c.text }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label-compact" for="specialty">Especialidad</label>
+                                    <input type="text" class="form-control form-control-sm" id="specialty" name="specialty"
+                                           maxlength="100" value="{{ educacion.specialty or '' }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label-compact" for="centertype">Tipo centro</label>
+                                    <select class="form-select form-select-sm" id="centertype" name="profesionalstudiescentertype">
+                                        <option value="">—</option>
+                                        <option value="1" {% if educacion.profesionalstudiescentertype == '1' %}selected{% endif %}>1</option>
+                                        <option value="2" {% if educacion.profesionalstudiescentertype == '2' %}selected{% endif %}>2</option>
+                                        <option value="3" {% if educacion.profesionalstudiescentertype == '3' %}selected{% endif %}>3</option>
+                                        <option value="4" {% if educacion.profesionalstudiescentertype == '4' %}selected{% endif %}>4</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label-compact" for="indicator">Indicador</label>
+                                    <input type="text" class="form-control form-control-sm" id="indicator" name="indicator"
+                                           maxlength="1" value="{{ educacion.indicator or '' }}">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="istrainer" name="istrainer" value="Y"
+                                               {% if educacion.istrainer == 'Y' %}checked{% endif %}>
+                                        <label class="form-check-label small" for="istrainer">Estudios concluidos</label>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label-compact" for="motivo_e">Motivo / observación</label>
+                                    <textarea class="form-control form-control-sm" id="motivo_e" name="motivo" rows="2" maxlength="500"></textarea>
+                                </div>
+                                <div class="col-12 d-grid">
+                                    <button type="submit" class="btn btn-primary btn-sm fw-semibold">
+                                        <i class="bi bi-send me-1"></i>Enviar solicitud de educación
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const cboInst = document.getElementById('costcenter1');
+    const cboCarr = document.getElementById('costcenter2');
+    const URL_CARRERAS = {{ url_for('api_ficha_carreras') | tojson }};
+    if (!cboInst || !cboCarr) return;
+    cboInst.addEventListener('change', async function () {
+        const pdt = this.value;
+        cboCarr.innerHTML = '<option value="">Cargando...</option>';
+        if (!pdt) {
+            cboCarr.innerHTML = '<option value="">Seleccione institución primero...</option>';
+            return;
+        }
+        try {
+            const res = await fetch(URL_CARRERAS + '?institucion=' + encodeURIComponent(pdt));
+            const data = await res.json();
+            cboCarr.innerHTML = '<option value="">Seleccione...</option>';
+            (data.items || []).forEach(function (it) {
+                const opt = document.createElement('option');
+                opt.value = it.id;
+                opt.textContent = it.text;
+                cboCarr.appendChild(opt);
+            });
+        } catch (e) {
+            cboCarr.innerHTML = '<option value="">Error</option>';
+        }
+    });
+});
+</script>
+{% endblock %}

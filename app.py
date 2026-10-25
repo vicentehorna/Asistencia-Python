@@ -117,6 +117,20 @@ from teletrabajo import (
     actualizar_avance_matriz,
     eliminar_actividad_matriz,
 )
+from ficha_datos import (
+    obtener_datos_contacto_actuales,
+    obtener_datos_educacion_actuales,
+    listar_niveles_instruccion,
+    listar_instituciones,
+    listar_carreras,
+    registrar_solicitud_contacto,
+    registrar_solicitud_educacion,
+    get_historial_contacto,
+    get_historial_educacion,
+    eliminar_solicitud_ficha,
+    aprobar_paso_ficha,
+    rechazar_paso_ficha,
+)
 
 load_dotenv()
 app = Flask(__name__)
@@ -144,6 +158,8 @@ def _unauthorized_json_friendly():
         or path.startswith('/rechazar-compensaciones')
         or path.startswith('/aprobar-teletrabajo')
         or path.startswith('/rechazar-teletrabajo')
+        or path.startswith('/aprobar-ficha-datos')
+        or path.startswith('/rechazar-ficha-datos')
         or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     )
     if wants_json:
@@ -276,6 +292,10 @@ def ensure_and_enforce_web_access():
         '/aprobar-teletrabajo-lista',
         '/aprobar-teletrabajo-nivel',
         '/rechazar-teletrabajo-nivel',
+        '/aprobar-ficha-datos-lista',
+        '/aprobar-ficha-datos-nivel',
+        '/rechazar-ficha-datos-nivel',
+        '/api/ficha-datos',
     )
     if path.startswith(json_action_prefixes):
         return jsonify({"error": "No tiene permiso para esta opción."}), 403
@@ -3051,6 +3071,320 @@ def rechazar_teletrabajo_nivel():
         return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
     except Exception as e:
         logging.exception('rechazar_teletrabajo_nivel')
+        return jsonify({'error': f'Error al rechazar: {e}'}), 500
+
+
+def _historial_ficha_items(rows, tipo):
+    out = []
+    for r in rows:
+        flujo = r.get('flujo') or {}
+        status = str(r.get('status') or '').upper()
+        can_delete = status == 'P' and not any(
+            str(p.get('Estado') or '').upper() == 'A' for p in (r.get('pasos_flujo') or [])
+        )
+        if tipo == 'FICHA_CONTACTO':
+            detalle = (
+                f"Tel: {r.get('SecTelephone') or '—'} · "
+                f"Email: {r.get('Email') or '—'} · "
+                f"Dir: {r.get('Address') or '—'}"
+            )
+        else:
+            detalle = (
+                f"Nivel: {r.get('InstructionLevel') or '—'} · "
+                f"Inst: {r.get('CostCenter1') or '—'} · "
+                f"Carrera: {r.get('CostCenter2') or '—'} · "
+                f"Egreso: {r.get('AnioEgreso') or '—'}"
+            )
+        out.append({
+            'id': r.get('Id'),
+            'detalle': detalle,
+            'flujo_label': flujo.get('label') or status,
+            'flujo_chip': flujo.get('chip') or 'secondary',
+            'can_delete': can_delete,
+        })
+    return out
+
+
+@app.route('/ficha-datos', methods=['GET', 'POST'])
+@login_required
+def ficha_datos_page():
+    ensure_user_session()
+    company, person = _vacaciones_company_person_solicitud()
+    tab = str(request.values.get('tab') or '').strip().lower()
+    if tab not in ('contacto', 'educacion'):
+        tab = 'contacto'
+
+    if not person:
+        flash('Su usuario no tiene trabajador asociado.', 'warning')
+
+    action = str(request.form.get('action') or '').strip() if request.method == 'POST' else ''
+
+    if request.method == 'POST' and action == 'delete_contacto':
+        sid = request.form.get('solicitud_id')
+        if company and person and sid and eliminar_solicitud_ficha(
+            company, person, sid, 'FICHA_CONTACTO'
+        ):
+            flash('Solicitud de contacto eliminada.', 'success')
+        else:
+            flash('No se pudo eliminar la solicitud.', 'warning')
+        return redirect(url_for('ficha_datos_page', tab='contacto'))
+
+    if request.method == 'POST' and action == 'delete_educacion':
+        sid = request.form.get('solicitud_id')
+        if company and person and sid and eliminar_solicitud_ficha(
+            company, person, sid, 'FICHA_EDUCACION'
+        ):
+            flash('Solicitud de educación eliminada.', 'success')
+        else:
+            flash('No se pudo eliminar la solicitud.', 'warning')
+        return redirect(url_for('ficha_datos_page', tab='educacion'))
+
+    if request.method == 'POST' and action == 'solicitud_contacto':
+        if not company or not person:
+            flash('No se pudo identificar su usuario.', 'error')
+        else:
+            ok, _line, err = registrar_solicitud_contacto(
+                company, person,
+                request.form.get('telefono'),
+                request.form.get('email'),
+                request.form.get('address'),
+                request.form.get('localite'),
+                request.form.get('motivo'),
+                current_user.id,
+            )
+            if ok:
+                flash('Solicitud de contacto enviada (Jefe → RR.HH.).', 'success')
+            else:
+                flash(err or 'No se pudo registrar la solicitud.', 'warning')
+        return redirect(url_for('ficha_datos_page', tab='contacto'))
+
+    if request.method == 'POST' and action == 'solicitud_educacion':
+        tab = 'educacion'
+        if not company or not person:
+            flash('No se pudo identificar su usuario.', 'error')
+        else:
+            datos = {
+                'instructionlevel': request.form.get('instructionlevel'),
+                'costcenter1': request.form.get('costcenter1'),
+                'costcenter2': request.form.get('costcenter2'),
+                'anio_egreso': request.form.get('anio_egreso'),
+                'specialty': request.form.get('specialty'),
+                'profesionalstudiescentertype': request.form.get('profesionalstudiescentertype'),
+                'istrainer': 'Y' if request.form.get('istrainer') else 'N',
+                'indicator': request.form.get('indicator'),
+            }
+            ok, _line, err = registrar_solicitud_educacion(
+                company, person, datos, request.form.get('motivo'), current_user.id,
+            )
+            if ok:
+                flash('Solicitud de educación enviada (Jefe → RR.HH.).', 'success')
+            else:
+                flash(err or 'No se pudo registrar la solicitud.', 'warning')
+        return redirect(url_for('ficha_datos_page', tab='educacion'))
+
+    contacto = obtener_datos_contacto_actuales(company, person) if company and person else {}
+    educacion = obtener_datos_educacion_actuales(company, person) if company and person else {}
+    hist_contacto = _historial_ficha_items(
+        get_historial_contacto(company, person) if company and person else [],
+        'FICHA_CONTACTO',
+    )
+    hist_educacion = _historial_ficha_items(
+        get_historial_educacion(company, person) if company and person else [],
+        'FICHA_EDUCACION',
+    )
+    instituciones = listar_instituciones(company) if company else []
+    carreras = []
+    if company and educacion.get('costcenter1'):
+        carreras = listar_carreras(company, educacion.get('costcenter1'))
+    return render_template(
+        'ficha_datos.html',
+        nombre_persona=_nombre_persona_sesion(person) if person else (contacto.get('name') or ''),
+        contacto=contacto,
+        educacion=educacion,
+        hist_contacto=hist_contacto,
+        hist_educacion=hist_educacion,
+        niveles=listar_niveles_instruccion(),
+        instituciones=instituciones,
+        carreras=carreras,
+        tab=tab,
+    )
+
+
+@app.route('/api/ficha-datos/carreras')
+@login_required
+def api_ficha_carreras():
+    ensure_user_session()
+    company, _person = _vacaciones_company_person_solicitud()
+    institucion = str(request.args.get('institucion') or '').strip()
+    if not company or not institucion:
+        return jsonify({'items': []})
+    return jsonify({'items': listar_carreras(company, institucion)})
+
+
+@app.route('/aprobar-ficha-datos')
+@login_required
+def aprobar_ficha_datos_page():
+    ensure_user_session()
+    return render_template('aprobar_ficha_datos.html')
+
+
+@app.route('/aprobar-ficha-datos-lista', methods=['POST'])
+@login_required
+def aprobar_ficha_datos_lista():
+    ensure_user_session()
+    body = request.get_json(silent=True) or {}
+    cia = _reporte_compania_usuario_logueado()
+    dni = str(body.get('dni') or '').strip()
+    tipo_filtro = str(body.get('tipo') or '').strip().upper()
+    if not cia:
+        return jsonify({'error': 'No se pudo identificar la compañía del usuario.'}), 400
+    actor = _actor_flujo_vacaciones_ctx()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'EXEC sp_ca_aprobar_ficha_datos_web @cia=?, @person=?, @dni=?',
+            (cia, '0', dni),
+        )
+        rows = _dicts_first_nonempty_resultset(cursor)
+        out = []
+        for r in rows:
+            tipo = str(r.get('tiposolicitud') or r.get('tipo') or '').strip().upper()
+            if tipo_filtro and tipo != tipo_filtro:
+                continue
+            status_code = str(r.get('status') or '').strip().upper() or 'P'
+            try:
+                sid_int = int(r.get('id')) if r.get('id') is not None else None
+            except (TypeError, ValueError):
+                sid_int = None
+            person_row = str(r.get('person') or '').strip()
+            flujo_label = status_code
+            flujo_chip = 'secondary'
+            can_approve = False
+            if sid_int is not None and person_row and status_code == 'P' and tipo:
+                from database import resolver_accion_flujo
+                accion = resolver_accion_flujo(
+                    cia, person_row, sid_int,
+                    actor['person_actor'], actor['profilecode'],
+                    menus=actor['menus'],
+                    unrestricted=actor['unrestricted'],
+                    web_admin=actor['web_admin'],
+                    approval_userid=str(getattr(current_user, 'id', '') or ''),
+                    tipo_solicitud=tipo,
+                )
+                resumen = accion.get('resumen') or {}
+                flujo_label = resumen.get('label') or str(r.get('descripcion_nivel') or '').strip() or 'Pendiente'
+                flujo_chip = resumen.get('chip') or 'warning'
+                can_approve = bool(accion.get('can_approve'))
+            elif status_code == 'A':
+                flujo_label, flujo_chip = 'Aprobado', 'success'
+            elif status_code == 'R':
+                flujo_label, flujo_chip = 'Rechazado', 'danger'
+            out.append({
+                'id': sid_int,
+                'person': person_row,
+                'name': str(r.get('name') or '').strip(),
+                'tipo': tipo,
+                'detalle': str(r.get('detalle') or '').strip(),
+                'status': status_code,
+                'flujo_label': flujo_label,
+                'flujo_chip': flujo_chip,
+                'can_approve': can_approve,
+            })
+        return jsonify({'rows': out})
+    except Exception as e:
+        logging.exception('aprobar_ficha_datos_lista')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/aprobar-ficha-datos-nivel', methods=['POST'])
+@login_required
+def aprobar_ficha_datos_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id')
+        person_dni = str(body.get('person') or '').strip()
+        tipo = str(body.get('tipo_solicitud') or body.get('tipo') or '').strip().upper()
+        observacion = str(body.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni or not tipo:
+            return jsonify({'error': 'Solicitud, trabajador o tipo no indicado.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = aprobar_paso_ficha(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            tipo_solicitud=tipo,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion or None,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo aprobar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('aprobar_ficha_datos_nivel')
+        return jsonify({'error': f'Error al aprobar: {e}'}), 500
+
+
+@app.route('/rechazar-ficha-datos-nivel', methods=['POST'])
+@login_required
+def rechazar_ficha_datos_nivel():
+    try:
+        ensure_user_session()
+        body = request.get_json(silent=True) or {}
+        company = _reporte_compania_usuario_logueado()
+        solicitud_id = body.get('solicitud_id')
+        person_dni = str(body.get('person') or '').strip()
+        tipo = str(body.get('tipo_solicitud') or body.get('tipo') or '').strip().upper()
+        observacion = str(body.get('observacion') or '').strip()
+        if not company:
+            return jsonify({'error': 'No se pudo identificar la compañía.'}), 400
+        if not solicitud_id or not person_dni or not tipo:
+            return jsonify({'error': 'Solicitud, trabajador o tipo no indicado.'}), 400
+        if not observacion:
+            return jsonify({'error': 'El motivo de rechazo es obligatorio.'}), 400
+        try:
+            line_id = int(solicitud_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Solicitud no válida.'}), 400
+        actor = _actor_flujo_vacaciones_ctx()
+        ok, msg, info = rechazar_paso_ficha(
+            company=company,
+            person=person_dni,
+            line=line_id,
+            tipo_solicitud=tipo,
+            approval_user=current_user.id,
+            person_actor=actor['person_actor'],
+            profilecode=actor['profilecode'],
+            menus=actor['menus'],
+            unrestricted=actor['unrestricted'],
+            web_admin=actor['web_admin'],
+            observacion=observacion,
+        )
+        if not ok:
+            return jsonify({'error': msg or 'No se pudo rechazar.'}), 409
+        return jsonify({'ok': True, 'message': msg, 'flujo': (info or {}).get('resumen')})
+    except Exception as e:
+        logging.exception('rechazar_ficha_datos_nivel')
         return jsonify({'error': f'Error al rechazar: {e}'}), 500
 
 

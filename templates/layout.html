@@ -481,6 +481,13 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if can_menu('ficha_datos') %}
+                <li class="{{ 'active' if request.endpoint == 'ficha_datos_page' else '' }}">
+                    <a href="{{ url_for('ficha_datos_page') }}" title="Ficha de Datos">
+                        <i class="bi bi-person-vcard"></i><span class="sidebar-link-text">Ficha de Datos</span>
+                    </a>
+                </li>
+                {% endif %}
                 {% if can_menu('consulta_asistencia') %}
                 <li class="{{ 'active' if request.endpoint == 'consulta_asistencia_page' else '' }}">
                     <a href="{{ url_for('consulta_asistencia_page') }}" title="Consulta de Asistencia">
@@ -503,7 +510,7 @@
                 </li>
                 {% endif %}
 
-                {% if can_menu('aprobar_vacaciones') or can_menu('aprobar_papeletas') or can_menu('aprobar_compensaciones') or can_menu('aprobar_teletrabajo') %}
+                {% if can_menu('aprobar_vacaciones') or can_menu('aprobar_papeletas') or can_menu('aprobar_compensaciones') or can_menu('aprobar_teletrabajo') or can_menu('aprobar_ficha_datos') %}
                 <li class="py-0">
                     <p class="sidebar-section-title px-3 mt-4 mb-0 text-uppercase fw-bold opacity-50">Aprobaciones</p>
                 </li>
@@ -533,6 +540,13 @@
                 <li class="{{ 'active' if request.endpoint == 'aprobar_teletrabajo_page' else '' }}">
                     <a href="{{ url_for('aprobar_teletrabajo_page') }}" title="Aprobar Teletrabajo">
                         <i class="bi bi-house-check"></i><span class="sidebar-link-text">Aprobar Teletrabajo</span>
+                    </a>
+                </li>
+                {% endif %}
+                {% if can_menu('aprobar_ficha_datos') %}
+                <li class="{{ 'active' if request.endpoint == 'aprobar_ficha_datos_page' else '' }}">
+                    <a href="{{ url_for('aprobar_ficha_datos_page') }}" title="Aprobar Ficha de Datos">
+                        <i class="bi bi-person-check"></i><span class="sidebar-link-text">Aprobar Ficha de Datos</span>
                     </a>
                 </li>
                 {% endif %}

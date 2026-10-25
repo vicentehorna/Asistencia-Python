@@ -54,6 +54,12 @@ ENDPOINT_MENU_MAP = {
     'aprobar_teletrabajo_lista': 'aprobar_teletrabajo',
     'aprobar_teletrabajo_nivel': 'aprobar_teletrabajo',
     'rechazar_teletrabajo_nivel': 'aprobar_teletrabajo',
+    'ficha_datos_page': 'ficha_datos',
+    'api_ficha_carreras': 'ficha_datos',
+    'aprobar_ficha_datos_page': 'aprobar_ficha_datos',
+    'aprobar_ficha_datos_lista': 'aprobar_ficha_datos',
+    'aprobar_ficha_datos_nivel': 'aprobar_ficha_datos',
+    'rechazar_ficha_datos_nivel': 'aprobar_ficha_datos',
 }
 
 # Prefijos de API / path -> menu_code (el más específico gana por longitud)
@@ -113,6 +119,12 @@ PATH_PREFIX_MENU_MAP = {
     '/aprobar-teletrabajo-nivel': 'aprobar_teletrabajo',
     '/rechazar-teletrabajo-nivel': 'aprobar_teletrabajo',
     '/aprobar-teletrabajo': 'aprobar_teletrabajo',
+    '/ficha-datos': 'ficha_datos',
+    '/api/ficha-datos': 'ficha_datos',
+    '/aprobar-ficha-datos-lista': 'aprobar_ficha_datos',
+    '/aprobar-ficha-datos-nivel': 'aprobar_ficha_datos',
+    '/rechazar-ficha-datos-nivel': 'aprobar_ficha_datos',
+    '/aprobar-ficha-datos': 'aprobar_ficha_datos',
 }
 
 # Catálogo de menús de Asistencia (hm_quimica también tiene menús de Planillas).
@@ -121,6 +133,7 @@ ASISTENCIA_MENU_CODES = frozenset(ENDPOINT_MENU_MAP.values()) | frozenset({
     'solicitud_papeletas', 'aprobar_papeletas',
     'banco_horas', 'aprobar_compensaciones',
     'teletrabajo', 'aprobar_teletrabajo',
+    'ficha_datos', 'aprobar_ficha_datos',
     'consulta_asistencia',
 })
 
@@ -249,6 +262,7 @@ def first_allowed_endpoint(session_obj) -> str:
         ('solicitud_papeletas', 'solicitud_papeletas_page'),
         ('banco_horas', 'banco_horas_page'),
         ('teletrabajo', 'teletrabajo_page'),
+        ('ficha_datos', 'ficha_datos_page'),
         ('consulta_asistencia', 'consulta_asistencia_page'),
         ('detalle_vacaciones', 'reporte_vacaciones_detalle_page'),
         ('saldo_vacaciones', 'reporte_saldo_vacaciones_page'),
@@ -256,6 +270,7 @@ def first_allowed_endpoint(session_obj) -> str:
         ('aprobar_papeletas', 'aprobar_papeletas_page'),
         ('aprobar_compensaciones', 'aprobar_compensaciones_page'),
         ('aprobar_teletrabajo', 'aprobar_teletrabajo_page'),
+        ('aprobar_ficha_datos', 'aprobar_ficha_datos_page'),
         ('maestro_horarios', 'maestro_horarios'),
         ('gestion_marcas', 'gestion_marcas'),
         ('reporte_resumen', 'reporte_resumen'),
