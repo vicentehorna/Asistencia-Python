@@ -1,5 +1,7 @@
 """Papeletas de salida / permisos — Portal Trabajador + flujo WF PAPELETA."""
+import os
 import re
+from pathlib import Path
 
 from database import (
     DatabaseConfig,
@@ -15,21 +17,70 @@ from database import (
 
 
 _RE_SUSTENTO_DRIVE = re.compile(r'SUSTENTO_DRIVE:([A-Za-z0-9_-]+)', re.I)
+_RE_SUSTENTO_LOCAL = re.compile(r'SUSTENTO_LOCAL:([^\s|;]+)', re.I)
+
+
+def carpeta_sustentos_locales(app_root=None):
+    """Carpeta local para demo en la misma PC (sin Google Drive)."""
+    base = Path(app_root or os.getcwd())
+    dest = base / 'uploads' / 'sustentos_papeletas'
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def parse_sustento_comments(comments):
+    text = str(comments or '')
+    m = _RE_SUSTENTO_DRIVE.search(text)
+    if m:
+        return {'tipo': 'drive', 'ref': m.group(1)}
+    m = _RE_SUSTENTO_LOCAL.search(text)
+    if m:
+        return {'tipo': 'local', 'ref': m.group(1).strip()}
+    return {'tipo': None, 'ref': None}
 
 
 def drive_file_id_desde_comments(comments):
-    m = _RE_SUSTENTO_DRIVE.search(str(comments or ''))
-    return m.group(1) if m else None
+    info = parse_sustento_comments(comments)
+    return info['ref'] if info.get('tipo') == 'drive' else None
 
 
-def obtener_drive_file_id_sustento_papeleta(company, person, line):
+def local_sustento_desde_comments(comments):
+    info = parse_sustento_comments(comments)
+    return info['ref'] if info.get('tipo') == 'local' else None
+
+
+def tiene_sustento_en_comments(comments):
+    return bool(parse_sustento_comments(comments).get('ref'))
+
+
+def guardar_sustento_local(archivo_stream, nombre_archivo, app_root=None):
+    """Guarda PDF en disco local. Retorna nombre de archivo relativo."""
+    safe = re.sub(r'[^\w.\-]+', '_', str(nombre_archivo or 'sustento.pdf'))[:120]
+    if not safe.lower().endswith('.pdf'):
+        safe = f'{safe}.pdf'
+    dest_dir = carpeta_sustentos_locales(app_root)
+    dest = dest_dir / safe
+    if dest.exists():
+        stem = dest.stem
+        for i in range(1, 50):
+            cand = dest_dir / f'{stem}_{i}.pdf'
+            if not cand.exists():
+                dest = cand
+                safe = cand.name
+                break
+    data = archivo_stream.read() if hasattr(archivo_stream, 'read') else archivo_stream
+    dest.write_bytes(data)
+    return safe
+
+
+def obtener_comments_sustento_papeleta(company, person, line):
     conn = None
     try:
         conn = DatabaseConfig.get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT TOP 1 Comments
+            SELECT TOP 1 Comments, NombreSustento
             FROM dbo.CA_PapeletaSolicitud
             WHERE Company = ? AND Person = ? AND Line = ?
             """,
@@ -38,16 +89,23 @@ def obtener_drive_file_id_sustento_papeleta(company, person, line):
         row = cursor.fetchone()
         cursor.close()
         conn.close()
-        return drive_file_id_desde_comments(row[0] if row else None)
+        if not row:
+            return None, None
+        return row[0], row[1]
     except Exception as e:
-        print(f'Error en obtener_drive_file_id_sustento_papeleta: {e}')
-        return None
+        print(f'Error en obtener_comments_sustento_papeleta: {e}')
+        return None, None
     finally:
         if conn:
             try:
                 conn.close()
             except Exception:
                 pass
+
+
+def obtener_drive_file_id_sustento_papeleta(company, person, line):
+    comments, _ = obtener_comments_sustento_papeleta(company, person, line)
+    return drive_file_id_desde_comments(comments)
 
 
 def tipo_requiere_sustento(tipo_codigo):
@@ -160,7 +218,7 @@ def registrar_papeleta(
     company, person, tipo_codigo, modo, motivo, user_id,
     fecha=None, hora_inicio=None, hora_fin=None, horas=None,
     fecha_inicio=None, fecha_fin=None, dias=None,
-    drive_file_id=None, nombre_sustento=None,
+    drive_file_id=None, local_sustento=None, nombre_sustento=None,
 ):
     """Inserta papeleta P y crea pasos WF PAPELETA. Retorna (ok, line)."""
     conn = None
@@ -185,6 +243,8 @@ def registrar_papeleta(
         comments = None
         if drive_file_id:
             comments = f"SUSTENTO_DRIVE:{str(drive_file_id).strip()}"[:255]
+        elif local_sustento:
+            comments = f"SUSTENTO_LOCAL:{str(local_sustento).strip()}"[:255]
         cursor.execute(
             """
             INSERT INTO dbo.CA_PapeletaSolicitud (

@@ -74,14 +74,18 @@ from google_drive import (
     mensaje_error_drive_para_usuario,
     codigo_error_drive_para_soporte,
 )
+from pathlib import Path
 from papeletas import (
     listar_tipos_papeleta,
     get_historial_papeletas,
     registrar_papeleta,
     eliminar_papeleta,
     tipo_requiere_sustento,
-    drive_file_id_desde_comments,
-    obtener_drive_file_id_sustento_papeleta,
+    tiene_sustento_en_comments,
+    parse_sustento_comments,
+    obtener_comments_sustento_papeleta,
+    guardar_sustento_local,
+    carpeta_sustentos_locales,
     aprobar_paso_flujo_papeleta,
     rechazar_paso_flujo_papeleta,
 )
@@ -1998,37 +2002,46 @@ def solicitud_papeletas_page():
                         flash('La hora fin debe ser posterior a la hora inicio.', 'warning')
                         ok_val = False
 
+            local_filename = None
             if ok_val and archivo and archivo.filename:
                 nombre_orig = str(archivo.filename or '').strip().lower()
                 if not nombre_orig.endswith('.pdf'):
                     flash('El sustento debe ser un archivo PDF.', 'warning')
                     ok_val = False
                 else:
+                    nombre_sustento = nombre_archivo_sustento_papeleta(
+                        person, tipo_codigo, datetime.now().strftime('%Y%m%d%H%M%S')
+                    )
+                    try:
+                        archivo.stream.seek(0)
+                    except Exception:
+                        pass
                     carpeta_info = carpeta_sustento_vacaciones_desde_env()
                     folder_id = carpeta_info.get('folder_id')
-                    if not folder_id:
-                        flash(
-                            'No hay carpeta de Drive configurada para sustentos '
-                            '(GOOGLE_DRIVE_FOLDER_SUSTENTO_VACACIONES).',
-                            'error',
-                        )
-                        ok_val = False
-                    else:
+                    if folder_id:
                         try:
-                            nombre_sustento = nombre_archivo_sustento_papeleta(
-                                person, tipo_codigo, 'tmp'
+                            drive_file_id = subir_pdf_sustento_drive(
+                                folder_id, nombre_sustento, archivo.stream, app_root=app.root_path
+                            )
+                        except Exception as e:
+                            logging.exception('upload sustento papeleta drive')
+                            flash(
+                                f'No se pudo subir a Drive ({mensaje_error_drive_para_usuario(e)}). '
+                                'Se guardará el PDF en esta PC.',
+                                'warning',
                             )
                             try:
                                 archivo.stream.seek(0)
                             except Exception:
                                 pass
-                            drive_file_id = subir_pdf_sustento_drive(
-                                folder_id, nombre_sustento, archivo.stream, app_root=app.root_path
+                            local_filename = guardar_sustento_local(
+                                archivo.stream, nombre_sustento, app_root=app.root_path
                             )
-                        except Exception as e:
-                            logging.exception('upload sustento papeleta')
-                            flash(mensaje_error_drive_para_usuario(e), 'error')
-                            ok_val = False
+                    else:
+                        # Demo en la misma PC: sin Drive, guardar localmente
+                        local_filename = guardar_sustento_local(
+                            archivo.stream, nombre_sustento, app_root=app.root_path
+                        )
 
             if ok_val:
                 ok, line = registrar_papeleta(
@@ -2046,6 +2059,7 @@ def solicitud_papeletas_page():
                     fecha_fin=fecha_fin,
                     dias=dias,
                     drive_file_id=drive_file_id,
+                    local_sustento=local_filename,
                     nombre_sustento=nombre_sustento,
                 )
                 if ok:
@@ -2123,7 +2137,7 @@ def aprobar_papeletas_lista():
             elif status_code == 'R':
                 flujo_label, flujo_chip, flujo_detalle = 'Rechazado', 'danger', 'Rechazado'
 
-            tiene_sustento = bool(drive_file_id_desde_comments(r.get('comments')))
+            tiene_sustento = tiene_sustento_en_comments(r.get('comments'))
             out.append({
                 'id': sid_int,
                 'person': person_row,
@@ -2249,15 +2263,31 @@ def descargar_sustento_papeleta():
             return jsonify({'error': 'Solicitud o compañía no indicada.'}), 400
         flash('Solicitud o compañía no indicada.', 'error')
         return redirect(url_for('aprobar_papeletas_page'))
-    drive_id = obtener_drive_file_id_sustento_papeleta(company, person, solicitud_id)
-    if not drive_id:
+    comments, nombre_db = obtener_comments_sustento_papeleta(company, person, solicitud_id)
+    info = parse_sustento_comments(comments)
+    if not info.get('ref'):
         if json_errors:
             return jsonify({'error': 'No hay sustento PDF registrado.'}), 404
         flash('No hay sustento PDF registrado.', 'error')
         return redirect(url_for('aprobar_papeletas_page'))
+
+    if info.get('tipo') == 'local':
+        dest = carpeta_sustentos_locales(app.root_path) / Path(info['ref']).name
+        if not dest.is_file():
+            if json_errors:
+                return jsonify({'error': 'El archivo local del sustento no existe.'}), 404
+            flash('El archivo local del sustento no existe.', 'error')
+            return redirect(url_for('aprobar_papeletas_page'))
+        return send_file(
+            dest,
+            as_attachment=True,
+            download_name=str(nombre_db or dest.name),
+            mimetype='application/pdf',
+        )
+
     try:
         archivo_io, nombre_archivo, mime = descargar_archivo_drive(
-            drive_id, app_root=app.root_path
+            info['ref'], app_root=app.root_path
         )
     except Exception as e:
         logging.exception('descargar_sustento_papeleta')
